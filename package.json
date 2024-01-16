@@ -1,0 +1,33 @@
+{
+  "author": "Minor Gordon",
+  "name": "webdatacommons",
+  "description": "TypeScript library and CLI for working with Web Data Commons datasets",
+  "dependencies": {
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.23.8",
+    "@types/jest": "^29.5.11",
+    "@types/n3": "1.16.4",
+    "babel-jest": "^29.7.0",
+    "jest": "^29.7.0",
+    "n3": "1.16.4",
+    "prettier": "^3.1.1",
+    "rimraf": "3.0.2",
+    "ts-jest": "^29.1.1",
+    "typescript": "5.3.3"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "GPL-3.0-only",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rimraf dist",
+    "rebuild": "rimraf dist && tsc -b",
+    "test": "jest",
+    "watch": "tsc -w --preserveWatchOutput"
+  },
+  "types": "dist/index.d.ts",
+  "version": "1.0.0"
+}
