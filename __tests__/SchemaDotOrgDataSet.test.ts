@@ -1,7 +1,8 @@
-import WebDataCommonsCorpus from "@/lib/models/WebDataCommonsCorpus";
+import WebDataCommons from "../src/WebDataCommons.js";
+import cacheDirectoryPath from "./cacheDirectoryPath.js";
 
-describe("WebDataCommonsCorpus", () => {
-  const sut = new WebDataCommonsCorpus({});
+describe("SchemaDotOrgDataSet", () => {
+  const sut = new WebDataCommons({cacheDirectoryPath}).schemaDotOrgDataSet({});
 
   it("gets the class-specific subsets", async () => {
     const classSpecificSubsets = await sut.classSpecificSubsets();

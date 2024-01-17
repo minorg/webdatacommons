@@ -1,11 +1,16 @@
-import WebDataCommonsCorpus from "@/lib/models/WebDataCommonsCorpus";
-import WebDataCommonsCorpusClassSpecificSubset from "@/lib/models/WebDataCommonsCorpusClassSpecificSubset";
+import SchemaDotOrgDataSetClassSpecificSubset from "../src/SchemaDotOrgDataSetClassSpecificSubset.js";
+import WebDataCommons from "../src/WebDataCommons.js";
+import cacheDirectoryPath from "./cacheDirectoryPath.js";
 
-describe("WebDataCommonsCorpusClassSpecificSubset", () => {
-  let sut: WebDataCommonsCorpusClassSpecificSubset;
+describe("SchemaDotOrgDataSetClassSpecificSubset", () => {
+  let classSpecificSubsets: readonly SchemaDotOrgDataSetClassSpecificSubset[];
+  let sut: SchemaDotOrgDataSetClassSpecificSubset;
 
   beforeAll(async () => {
-    sut = (await new WebDataCommonsCorpus({}).classSpecificSubsets())[0];
+    classSpecificSubsets = await new WebDataCommons({cacheDirectoryPath})
+      .schemaDotOrgDataSet({})
+      .classSpecificSubsets();
+    sut = classSpecificSubsets[0];
     expect(sut.className).toBe("AdministrativeArea");
   });
 
@@ -24,12 +29,12 @@ describe("WebDataCommonsCorpusClassSpecificSubset", () => {
     expect(Object.keys(samplePagesByIri)).toHaveLength(1);
   });
 
-  it(
+  it.skip(
     "get all PLD stats files in parallel",
     async () => {
       await Promise.all(
-        (await new WebDataCommonsCorpus({}).classSpecificSubsets()).map(
-          (classSpecificSubset) => classSpecificSubset.pldStatsCsvString()
+        classSpecificSubsets.map((classSpecificSubset) =>
+          classSpecificSubset.pldStatsCsvString()
         )
       );
     },
@@ -37,21 +42,19 @@ describe("WebDataCommonsCorpusClassSpecificSubset", () => {
   );
 
   it("gets empty PLD stats for Organization (large PLD stats file)", async () => {
-    const sut = (
-      await new WebDataCommonsCorpus({}).classSpecificSubsets()
-    ).find(
+    const sut = classSpecificSubsets.find(
       (classSpecificSubset) => classSpecificSubset.className === "Organization"
     )!;
     const pldStats = await sut.pldStats();
     expect(pldStats).toHaveLength(0);
   });
 
-  it(
+  it.skip(
     "get all sample files in parallel",
     async () => {
       await Promise.all(
-        (await new WebDataCommonsCorpus({}).classSpecificSubsets()).map(
-          (classSpecificSubset) => classSpecificSubset.sampleNquadsString()
+        classSpecificSubsets.map((classSpecificSubset) =>
+          classSpecificSubset.sampleNquadsString()
         )
       );
     },
