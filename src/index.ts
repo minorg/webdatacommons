@@ -1,1 +1,3 @@
-import "./structureddata";
+import WebDataCommons from "WebDataCommons";
+
+export default WebDataCommons;

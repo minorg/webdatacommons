@@ -7,7 +7,6 @@ import {
 import SchemaDotOrgDataSetClassSpecificSubset from "./SchemaDotOrgDataSetClassSpecificSubset";
 import {Memoize} from "typescript-memoize";
 import path from "node:path";
-import {dataDirPath} from "@/lib/paths";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import HttpClient from "./HttpClient";
 import SchemaDotOrgRelatedClass from "./SchemaDotOrgRelatedClass";
@@ -46,20 +45,14 @@ export default class SchemaDotOrgCorpus {
   private readonly httpClient: HttpClient;
   readonly version: string;
 
-  constructor({version}: {version?: string}) {
-    this.httpClient = new HttpClient({
-      cacheDirectoryPath: path.resolve(
-        dataDirPath,
-        "webdatacommons",
-        "http-cache"
-      ),
-      gotOptions: {
-        retry: {
-          limit: 10,
-        },
-      },
-    });
-
+  constructor({
+    httpClient,
+    version,
+  }: {
+    httpClient: HttpClient;
+    version: string;
+  }) {
+    this.httpClient = httpClient;
     this.version = version ?? "2022-12";
   }
 
