@@ -1,12 +1,12 @@
-const esModules = [];
-
-/** @type {import('ts-jest').JestConfigWithTsJest} */
-module.exports = {
+export default {
+  // extensionsToTreatAsEsm: [".ts"],
+  // globals: {"ts-jest": {diagnostics: false}},
   preset: "ts-jest",
   testEnvironment: "node",
-  transform: {
-    "^.+\\.jsx?$": "babel-jest",
-    "^.+\\.tsx?$": "ts-jest",
-  },
-  transformIgnorePatterns: [`node_modules/(?!${esModules.join("|")})`],
+  transform: {},
+  // transform: {
+  //   "^.+\\.jsx?$": "babel-jest",
+  //   "^.+\\.tsx?$": "ts-jest",
+  // },
+  // transformIgnorePatterns: [`node_modules/(?!${esModules.join("|")})`],
 };
