@@ -4,12 +4,10 @@ import {
   TextNode,
   parse as parseHtml,
 } from "node-html-parser";
-import SchemaDotOrgDataSetClassSpecificSubset from "./SchemaDotOrgDataSetClassSpecificSubset";
+import SchemaDotOrgDataSetClassSpecificSubset from "./SchemaDotOrgDataSetClassSpecificSubset.js";
 import {Memoize} from "typescript-memoize";
-import path from "node:path";
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import HttpClient from "./HttpClient";
-import SchemaDotOrgRelatedClass from "./SchemaDotOrgRelatedClass";
+import HttpClient from "./HttpClient.js";
+import SchemaDotOrgRelatedClass from "./SchemaDotOrgRelatedClass.js";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>

@@ -3,7 +3,8 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import invariant from "ts-invariant";
 import contentTypeParser from "content-type";
-import brotliDecompress from "./brotliDecompress";
+import brotliDecompress from "./brotliDecompress.js";
+import brotliCompressText from "./brotliCompressText.js";
 
 const isTextResponseBody = ({
   contentTypeHeader,

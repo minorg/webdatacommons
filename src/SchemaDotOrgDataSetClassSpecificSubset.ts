@@ -1,11 +1,11 @@
 import {Parser, Store} from "n3";
 import Papa from "papaparse";
 import {Memoize} from "typescript-memoize";
-import SchemaDotOrgClassGeneralStats from "./SchemaDotOrgClassGeneralStats";
-import SchemaDotOrgRelatedClass from "./SchemaDotOrgRelatedClass";
-import SchemaDotOrgClassPayLevelDomainStats from "./SchemaDotOrgClassPayLevelDomainStats";
-import HttpClient from "./HttpClient";
-import SchemaDotDataSetCorpusPageSubset from "./SchemaDotOrgDataSetPageSubset";
+import SchemaDotOrgClassGeneralStats from "./SchemaDotOrgClassGeneralStats.js";
+import SchemaDotOrgRelatedClass from "./SchemaDotOrgRelatedClass.js";
+import SchemaDotOrgClassPayLevelDomainStats from "./SchemaDotOrgClassPayLevelDomainStats.js";
+import HttpClient from "./HttpClient.js";
+import SchemaDotDataSetCorpusPageSubset from "./SchemaDotOrgDataSetPageSubset.js";
 
 const parsePldStatsPropertiesAndDensity = (
   json: string | undefined
@@ -23,7 +23,6 @@ const parsePldStatsPropertiesAndDensity = (
 
 export default class SchemaDotOrgDataSetClassSpecificSubset {
   readonly className: string;
-  private readonly downloadHref: string;
   readonly generalStats: SchemaDotOrgClassGeneralStats;
   private readonly httpClient: HttpClient;
   private readonly pldStatsHref: string;
@@ -33,7 +32,6 @@ export default class SchemaDotOrgDataSetClassSpecificSubset {
 
   constructor({
     className,
-    downloadHref,
     generalStats,
     httpClient,
     relatedClasses,
@@ -55,7 +53,6 @@ export default class SchemaDotOrgDataSetClassSpecificSubset {
     size: string;
   }) {
     this.className = className;
-    this.downloadHref = downloadHref;
     this.generalStats = generalStats;
     this.httpClient = httpClient;
     this.pldStatsHref = pldStatsHref;

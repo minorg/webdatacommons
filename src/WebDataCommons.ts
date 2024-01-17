@@ -1,5 +1,5 @@
-import HttpClient from "./HttpClient";
-import SchemaDotOrgDataSet from "./SchemaDotOrgDataSet";
+import HttpClient from "./HttpClient.js";
+import SchemaDotOrgDataSet from "./SchemaDotOrgDataSet.js";
 
 export default class WebDataCommons {
   private readonly httpClient: HttpClient;

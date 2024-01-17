@@ -36,11 +36,14 @@
     "ts-jest": "^29.1.1",
     "typescript": "5.3.3"
   },
+  "engines": {
+    "node": ">=16"
+  },
   "files": [
     "dist"
   ],
   "license": "GPL-3.0-only",
-  "main": "dist/index.js",
+  "exports": "./dist/index.js",
   "scripts": {
     "build": "tsc -b",
     "clean": "rimraf dist",
@@ -48,6 +51,7 @@
     "test": "jest",
     "watch": "tsc -w --preserveWatchOutput"
   },
+  "type": "module",
   "types": "dist/index.d.ts",
   "version": "1.0.0"
 }
