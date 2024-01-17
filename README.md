@@ -8,6 +8,8 @@ TypeScript library and CLI for working with Web Data Commons datasets
 
 ## Usage
 
-    import WebDataCommons from "webdatacommons";
+```typescript
+import WebDataCommons from "webdatacommons";
 
-    const classSpecificSubets = new WebDataCommons({cacheDirectoryPath: "path/to/directory"}).schemaDotOrgDataSet();
+const classSpecificSubets = new WebDataCommons({cacheDirectoryPath: "path/to/directory"}).schemaDotOrgDataSet();
+```
