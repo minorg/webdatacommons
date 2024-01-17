@@ -4,9 +4,8 @@ import {Memoize} from "typescript-memoize";
 import SchemaDotOrgClassGeneralStats from "./SchemaDotOrgClassGeneralStats";
 import SchemaDotOrgRelatedClass from "./SchemaDotOrgRelatedClass";
 import SchemaDotOrgClassPayLevelDomainStats from "./SchemaDotOrgClassPayLevelDomainStats";
-import HttpClient from "@/lib/HttpClient";
-import SchemaDotOrgCorpusPageSubset from "./SchemaDotOrgPageSubset";
-import slugify from "../slugify";
+import HttpClient from "./HttpClient";
+import SchemaDotDataSetCorpusPageSubset from "./SchemaDotOrgDataSetPageSubset";
 
 const parsePldStatsPropertiesAndDensity = (
   json: string | undefined
@@ -22,7 +21,7 @@ const parsePldStatsPropertiesAndDensity = (
   }
 };
 
-export default class SchemaDotOrgCorpusClassSpecificSubset {
+export default class SchemaDotOrgDataSetClassSpecificSubset {
   readonly className: string;
   private readonly downloadHref: string;
   readonly generalStats: SchemaDotOrgClassGeneralStats;
@@ -119,9 +118,9 @@ export default class SchemaDotOrgCorpusClassSpecificSubset {
 
   @Memoize()
   async samplePagesByIri(): Promise<
-    Record<string, SchemaDotOrgCorpusPageSubset>
+    Record<string, SchemaDotDataSetCorpusPageSubset>
   > {
-    const result: Record<string, SchemaDotOrgCorpusPageSubset> = {};
+    const result: Record<string, SchemaDotDataSetCorpusPageSubset> = {};
     const parser = new Parser({format: "N-Quads"});
     parser.parse(await this.sampleNquadsString(), (error, quad) => {
       if (error) {
@@ -136,25 +135,13 @@ export default class SchemaDotOrgCorpusClassSpecificSubset {
       }
       let page = result[pageIri.value];
       if (!page) {
-        page = result[pageIri.value] = new SchemaDotOrgCorpusPageSubset({
+        page = result[pageIri.value] = new SchemaDotDataSetCorpusPageSubset({
           dataset: new Store(),
           pageIri,
         });
       }
       (page.dataset as Store).addQuad(quad);
     });
-    return result;
-  }
-
-  @Memoize()
-  async samplePagesByIriSlug(): Promise<
-    Record<string, SchemaDotOrgCorpusPageSubset>
-  > {
-    const samplePagesByIri = await this.samplePagesByIri();
-    const result: Record<string, SchemaDotOrgCorpusPageSubset> = {};
-    for (const samplePageIri in samplePagesByIri) {
-      result[slugify(samplePageIri)] = samplePagesByIri[samplePageIri];
-    }
     return result;
   }
 }

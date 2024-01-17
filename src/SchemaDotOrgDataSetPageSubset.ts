@@ -1,6 +1,6 @@
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 
-export default class SchemaDotOrgCorpusPageSubset {
+export default class SchemaDotDataSetCorpusPageSubset {
   readonly dataset: DatasetCore;
   readonly pageIri: NamedNode;
 

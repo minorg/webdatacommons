@@ -4,12 +4,12 @@ import {
   TextNode,
   parse as parseHtml,
 } from "node-html-parser";
-import SchemaDotOrgCorpusClassSpecificSubset from "./SchemaDotOrgCorpusClassSpecificSubset";
+import SchemaDotOrgDataSetClassSpecificSubset from "./SchemaDotOrgDataSetClassSpecificSubset";
 import {Memoize} from "typescript-memoize";
 import path from "node:path";
 import {dataDirPath} from "@/lib/paths";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import HttpClient from "@/lib/HttpClient";
+import HttpClient from "./HttpClient";
 import SchemaDotOrgRelatedClass from "./SchemaDotOrgRelatedClass";
 
 // Utility functions
@@ -65,7 +65,7 @@ export default class SchemaDotOrgCorpus {
 
   @Memoize()
   async classSpecificSubsets(): Promise<
-    readonly SchemaDotOrgCorpusClassSpecificSubset[]
+    readonly SchemaDotOrgDataSetClassSpecificSubset[]
   > {
     const metadataHtml: string = (
       await this.httpClient.get(
@@ -111,7 +111,7 @@ export default class SchemaDotOrgCorpus {
         const pldStatsHref =
           tableCells[4].getElementsByTagName("a")[1].attributes["href"];
 
-        return new SchemaDotOrgCorpusClassSpecificSubset({
+        return new SchemaDotOrgDataSetClassSpecificSubset({
           className: tableRow.getElementsByTagName("th")[0].text,
           downloadHref: downloadHrefs[0],
           generalStats: {
@@ -130,14 +130,14 @@ export default class SchemaDotOrgCorpus {
 
   @Memoize()
   async classSpecificSubsetsByClassName(): Promise<
-    Record<string, SchemaDotOrgCorpusClassSpecificSubset>
+    Record<string, SchemaDotOrgDataSetClassSpecificSubset>
   > {
     return (await this.classSpecificSubsets()).reduce(
       (map, classSpecificSubset) => {
         map[classSpecificSubset.className] = classSpecificSubset;
         return map;
       },
-      {} as Record<string, SchemaDotOrgCorpusClassSpecificSubset>
+      {} as Record<string, SchemaDotOrgDataSetClassSpecificSubset>
     );
   }
 }
