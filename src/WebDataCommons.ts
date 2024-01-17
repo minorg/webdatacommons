@@ -15,10 +15,10 @@ export default class WebDataCommons {
     });
   }
 
-  schemaDotOrgDataSet({version}: {version?: string}): SchemaDotOrgDataSet {
+  schemaDotOrgDataSet(kwds?: {version?: string}): SchemaDotOrgDataSet {
     return new SchemaDotOrgDataSet({
       httpClient: this.httpClient,
-      version: version ?? "2022-12",
+      version: kwds?.version ?? "2022-12",
     });
   }
 }
