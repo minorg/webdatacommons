@@ -1,4 +1,4 @@
-import HttpClient from "../src/HttpClient";
+import HttpClient from "../src/HttpClient.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
