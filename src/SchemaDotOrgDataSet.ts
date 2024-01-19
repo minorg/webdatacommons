@@ -12,7 +12,7 @@ import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
-import {Readable} from "node:stream";
+import streamToBuffer from "streamToBuffer.js";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -76,13 +76,15 @@ class SchemaDotOrgDataSet {
   @Memoize()
   async classSubsets(): Promise<readonly SchemaDotOrgDataSet.ClassSubset[]> {
     const metadataHtml: string = (
-      await this.httpClient.get(
-        `https://webdatacommons.org/structureddata/${this.version}/stats/schema_org_subsets.html`
-        // {
-        //   cache: {
-        //     ttl: 31556952000, // 1 year
-        //   },
-        // }
+      await streamToBuffer(
+        await this.httpClient.get(
+          `https://webdatacommons.org/structureddata/${this.version}/stats/schema_org_subsets.html`
+          // {
+          //   cache: {
+          //     ttl: 31556952000, // 1 year
+          //   },
+          // }
+        )
       )
     ).toString("utf8");
 
@@ -204,12 +206,7 @@ namespace SchemaDotOrgDataSet {
 
     private async lookupCsvString(): Promise<string> {
       return (
-        await this.httpClient.get(this.lookupFileUrl, {
-          //   cache: {
-          //     ttl: 31556952000, // 1 year
-          //   },
-          // })
-        })
+        await streamToBuffer(await this.httpClient.get(this.lookupFileUrl))
       ).toString("utf8");
     }
 
@@ -280,22 +277,13 @@ namespace SchemaDotOrgDataSet {
 
     private async pldStatsCsvString(): Promise<string> {
       return (
-        await this.httpClient.get(this.pldStatsFileUrl, {
-          //   cache: {
-          //     ttl: 31556952000, // 1 year
-          //   },
-          // })
-        })
+        await streamToBuffer(await this.httpClient.get(this.pldStatsFileUrl))
       ).toString("utf8");
     }
 
     private async sampleNquadsString(): Promise<string> {
       return (
-        await this.httpClient.get(this.sampleDataFileUrl, {
-          // cache: {
-          //   ttl: 31556952000, // 1 year
-          // },
-        })
+        await streamToBuffer(await this.httpClient.get(this.sampleDataFileUrl))
       ).toString("utf8");
     }
 
@@ -379,17 +367,15 @@ namespace SchemaDotOrgDataSet {
 
       @Memoize()
       async dataset(): Promise<DatasetCore> {
-        console.info(this.dataFileUrl);
-        const gzBuffer = await this.httpClient.get(this.dataFileUrl);
+        const gzStream = await this.httpClient.get(this.dataFileUrl);
         return new Promise((resolve, reject) => {
-          const gzStream = Readable.from(gzBuffer);
           const inflate = zlib.createInflate();
           const parser = new StreamParser();
           const quadStream = gzStream.pipe(inflate).pipe(parser);
 
           const store = new Store();
           quadStream.on("data", (data) => {
-            console.info("data");
+            console.info("data", data);
           });
           quadStream.on("end", (error: any) => {
             if (error) {

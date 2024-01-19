@@ -2,16 +2,7 @@ import HttpClient from "../src/HttpClient.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import concat from "concat-stream";
-import {Stream} from "node:stream";
-
-const streamToBuffer = (stream: Stream): Promise<Buffer> => {
-  return new Promise((resolve, reject) => {
-    const concatStream = concat(resolve);
-    stream.on("error", reject);
-    stream.pipe(concatStream);
-  });
-};
+import streamToBuffer from "../src/streamToBuffer.js";
 
 describe("HttpClient", () => {
   let sut: HttpClient;
