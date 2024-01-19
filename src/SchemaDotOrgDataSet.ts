@@ -7,9 +7,12 @@ import {
 } from "node-html-parser";
 import {Memoize} from "typescript-memoize";
 import HttpClient from "./HttpClient.js";
-import {Parser, Store} from "n3";
+import {Parser, StreamParser, Store} from "n3";
 import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
+import {invariant} from "ts-invariant";
+import zlib from "node:zlib";
+import {Readable} from "node:stream";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -113,25 +116,25 @@ class SchemaDotOrgDataSet {
           .getElementsByTagName("a")
           .map((anchorElement) => anchorElement.attributes["href"]);
 
-        const lookupHref =
+        const lookupFileUrl =
           tableCells[4].getElementsByTagName("a")[0].attributes["href"];
 
-        const pldStatsHref =
+        const pldStatsFileUrl =
           tableCells[4].getElementsByTagName("a")[1].attributes["href"];
 
         return new SchemaDotOrgDataSet.ClassSubset({
           className: tableRow.getElementsByTagName("th")[0].text,
-          downloadHref: downloadHrefs[0],
+          downloadDirectoryUrl: downloadHrefs[0],
           generalStats: {
             hosts: generalStatsHosts,
             quads: generalStatsQuads,
             urls: generalStatsUrls,
           },
           httpClient: this.httpClient,
-          lookupHref,
-          pldStatsHref,
+          lookupFileUrl,
+          pldStatsFileUrl,
           relatedClasses,
-          sampleDownloadHref: downloadHrefs[1],
+          sampleDataFileUrl: downloadHrefs[1],
           size: sizeCell.text,
         });
       });
@@ -154,51 +157,54 @@ class SchemaDotOrgDataSet {
 namespace SchemaDotOrgDataSet {
   export class ClassSubset {
     readonly className: string;
+    private readonly downloadDirectoryUrl: string;
     readonly generalStats: SchemaDotOrgDataSet.ClassSubset.GeneralStats;
     private readonly httpClient: HttpClient;
-    private readonly pldStatsHref: string;
-    private readonly lookupHref: string;
+    private readonly pldStatsFileUrl: string;
+    private readonly lookupFileUrl: string;
     readonly relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
-    private readonly sampleDownloadHref: string;
+    private readonly sampleDataFileUrl: string;
     readonly size: string;
 
     constructor({
       className,
+      downloadDirectoryUrl,
       generalStats,
       httpClient,
       relatedClasses,
-      lookupHref,
-      pldStatsHref,
-      sampleDownloadHref,
+      lookupFileUrl,
+      pldStatsFileUrl,
+      sampleDataFileUrl,
       size,
     }: {
       className: string;
-      downloadHref: string;
+      downloadDirectoryUrl: string;
       generalStats: {
         hosts: number;
         quads: number;
         urls: number;
       };
       httpClient: HttpClient;
-      lookupHref: string;
-      pldStatsHref: string;
+      lookupFileUrl: string;
+      pldStatsFileUrl: string;
       relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
-      sampleDownloadHref: string;
+      sampleDataFileUrl: string;
       size: string;
     }) {
       this.className = className;
+      this.downloadDirectoryUrl = downloadDirectoryUrl;
       this.generalStats = generalStats;
       this.httpClient = httpClient;
-      this.lookupHref = lookupHref;
-      this.pldStatsHref = pldStatsHref;
+      this.lookupFileUrl = lookupFileUrl;
+      this.pldStatsFileUrl = pldStatsFileUrl;
       this.relatedClasses = relatedClasses;
-      this.sampleDownloadHref = sampleDownloadHref;
+      this.sampleDataFileUrl = sampleDataFileUrl;
       this.size = size;
     }
 
     private async lookupCsvString(): Promise<string> {
       return (
-        await this.httpClient.get(this.lookupHref, {
+        await this.httpClient.get(this.lookupFileUrl, {
           //   cache: {
           //     ttl: 31556952000, // 1 year
           //   },
@@ -207,8 +213,7 @@ namespace SchemaDotOrgDataSet {
       ).toString("utf8");
     }
 
-    @Memoize()
-    async pldFileNames(): Promise<Record<string, string>> {
+    private async pldDataFileNames(): Promise<Record<string, string>> {
       return Papa.parse(await this.lookupCsvString(), {
         header: true,
       }).data.reduce((map: Record<string, string>, row: any) => {
@@ -220,31 +225,9 @@ namespace SchemaDotOrgDataSet {
     }
 
     @Memoize()
-    async payLevelDomainSubsets(): Promise<
-      readonly SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset[]
+    async payLevelDomainSubsetsByDomain(): Promise<
+      Record<string, SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset>
     > {
-      return Papa.parse(await this.pldStatsCsvString(), {
-        delimiter: "\t",
-        header: true,
-      }).data.flatMap((row: any) =>
-        row["Domain"].length > 0
-          ? [
-              {
-                domain: row["Domain"] as string,
-                stats: {
-                  entitiesOfClass: parseInt(row["#Entities of class"]),
-                  propertiesAndDensity: parsePldStatsPropertiesAndDensity(
-                    row["Properties and Density"]
-                  ),
-                  quadsOfSubset: parseInt(row["#Quads of Subset"]),
-                },
-              },
-            ]
-          : []
-      );
-    }
-
-    private async pldStatsCsvString(): Promise<string> {
       switch (this.className) {
         case "CreativeWork":
         case "LocalBusiness":
@@ -252,11 +235,52 @@ namespace SchemaDotOrgDataSet {
         case "Person":
         case "Product":
           // Skip large PLD stats files
-          return "";
+          return {};
       }
 
+      const pldDataFileNames = await this.pldDataFileNames();
       return (
-        await this.httpClient.get(this.pldStatsHref, {
+        Papa.parse(await this.pldStatsCsvString(), {
+          delimiter: "\t",
+          header: true,
+        }).data as any[]
+      ).reduce(
+        (
+          map: Record<
+            string,
+            SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset
+          >,
+          row: any
+        ) => {
+          const domain = row["Domain"] as string;
+          if (domain.length === 0) {
+            return map;
+          }
+          const dataFileName = pldDataFileNames[domain];
+          invariant(dataFileName, "missing domain file: " + domain);
+
+          map[domain] =
+            new SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset({
+              dataFileUrl: this.downloadDirectoryUrl + "/" + dataFileName,
+              domain,
+              httpClient: this.httpClient,
+              stats: {
+                entitiesOfClass: parseInt(row["#Entities of class"]),
+                propertiesAndDensity: parsePldStatsPropertiesAndDensity(
+                  row["Properties and Density"]
+                ),
+                quadsOfSubset: parseInt(row["#Quads of Subset"]),
+              },
+            });
+          return map;
+        },
+        {}
+      );
+    }
+
+    private async pldStatsCsvString(): Promise<string> {
+      return (
+        await this.httpClient.get(this.pldStatsFileUrl, {
           //   cache: {
           //     ttl: 31556952000, // 1 year
           //   },
@@ -267,7 +291,7 @@ namespace SchemaDotOrgDataSet {
 
     private async sampleNquadsString(): Promise<string> {
       return (
-        await this.httpClient.get(this.sampleDownloadHref, {
+        await this.httpClient.get(this.sampleDataFileUrl, {
           // cache: {
           //   ttl: 31556952000, // 1 year
           // },
@@ -331,18 +355,50 @@ namespace SchemaDotOrgDataSet {
     }
 
     export class PayLevelDomainSubset {
+      private readonly dataFileUrl: string;
+      private readonly httpClient: HttpClient;
       readonly domain: string;
       readonly stats: PayLevelDomainSubset.Stats;
 
       constructor({
+        dataFileUrl,
         domain,
+        httpClient,
         stats,
       }: {
+        dataFileUrl: string;
         domain: string;
+        httpClient: HttpClient;
         stats: PayLevelDomainSubset.Stats;
       }) {
+        this.dataFileUrl = dataFileUrl;
         this.domain = domain;
+        this.httpClient = httpClient;
         this.stats = stats;
+      }
+
+      @Memoize()
+      async dataset(): Promise<DatasetCore> {
+        console.info(this.dataFileUrl);
+        const gzBuffer = await this.httpClient.get(this.dataFileUrl);
+        return new Promise((resolve, reject) => {
+          const gzStream = Readable.from(gzBuffer);
+          const inflate = zlib.createInflate();
+          const parser = new StreamParser();
+          const quadStream = gzStream.pipe(inflate).pipe(parser);
+
+          const store = new Store();
+          quadStream.on("data", (data) => {
+            console.info("data");
+          });
+          quadStream.on("end", (error: any) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve(store);
+            }
+          });
+        });
       }
     }
 
