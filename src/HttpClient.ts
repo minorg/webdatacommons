@@ -1,10 +1,12 @@
-import got, {ExtendOptions, Got, OptionsOfTextResponseBody} from "got";
+import got, {ExtendOptions, Got, Response} from "got";
 import path from "node:path";
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import {invariant} from "ts-invariant";
 import contentTypeParser from "content-type";
-import brotliDecompress from "./brotliDecompress.js";
-import brotliCompressText from "./brotliCompressText.js";
+import {Stream} from "node:stream";
+import zlib from "node:zlib";
+import {pipeline as streamPipeline} from "node:stream/promises";
 
 const isTextResponseBody = ({
   contentTypeHeader,
@@ -71,21 +73,11 @@ export default class HttpClient {
     );
   }
 
-  async get(
-    url: string,
-    gotOptions?: OptionsOfTextResponseBody
-  ): Promise<Buffer> {
-    let cacheFilePath = this.cacheFilePath(url);
+  async get(url: string): Promise<Stream> {
     try {
-      // Common case, compressed text
-      return await brotliDecompress(await fs.readFile(cacheFilePath + ".br"));
+      return this.getCached(url);
     } catch {
-      try {
-        // Uncommon case, uncompressed data
-        return await fs.readFile(cacheFilePath);
-      } catch {
-        /* empty */
-      }
+      /* empty */
     }
 
     switch (process.env.NODE_ENV) {
@@ -94,26 +86,63 @@ export default class HttpClient {
         break;
       default:
         throw new Error(
-          `refusing to make network request for ${url} in environment ${process.env.NODE_ENV} and ${cacheFilePath} does not exist`
+          `refusing to make network request for ${url} in environment ${process.env.NODE_ENV}`
         );
     }
 
-    const response = await this.got.get(url, gotOptions);
+    await this.getUncached(url);
 
-    let cacheFileContents = response.rawBody;
+    return this.getCached(url);
+  }
 
-    const contentTypeHeader = response.headers["content-type"];
-    if (!contentTypeHeader) {
-      throw new RangeError("response has no Content-Type header");
-    }
-    if (contentTypeHeader && isTextResponseBody({contentTypeHeader, url})) {
-      cacheFileContents = await brotliCompressText(cacheFileContents);
+  private getCached(url: string): Stream {
+    let cacheFilePath = this.cacheFilePath(url);
+    try {
+      return fs.createReadStream(cacheFilePath);
+    } catch {
       cacheFilePath += ".br";
+      return fs
+        .createReadStream(cacheFilePath)
+        .pipe(zlib.createBrotliDecompress());
     }
+  }
 
-    await fs.mkdir(path.dirname(cacheFilePath), {recursive: true});
-    await fs.writeFile(cacheFilePath, cacheFileContents);
+  private async getUncached(url: string): Promise<void> {
+    const requestStream = this.got.stream(url);
+    requestStream.on("response", async (response: Response) => {
+      const contentTypeHeader = response.headers["content-type"];
+      if (!contentTypeHeader) {
+        throw new RangeError("response has no Content-Type header");
+      }
+      const compress =
+        contentTypeHeader && isTextResponseBody({contentTypeHeader, url});
 
-    return response.rawBody;
+      let cacheFilePath = this.cacheFilePath(url);
+      if (compress) {
+        cacheFilePath += ".br";
+      }
+
+      requestStream.off("error", (error) => {
+        throw error;
+      });
+
+      await fsPromises.mkdir(path.dirname(cacheFilePath), {recursive: true});
+
+      const cacheFileStream = fs.createWriteStream(cacheFilePath);
+
+      if (compress) {
+        await streamPipeline(
+          requestStream,
+          zlib.createBrotliCompress(),
+          cacheFileStream
+        );
+      } else {
+        await streamPipeline(requestStream, cacheFileStream);
+      }
+    });
+
+    requestStream.once("error", (error) => {
+      throw error;
+    });
   }
 }
