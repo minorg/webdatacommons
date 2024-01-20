@@ -167,9 +167,12 @@ export default class HttpClient {
 
         logger.debug("waiting on stream pipeline to %s", cacheFilePath);
         if (compress) {
+          const brotliCompressParams: Record<number, number> = {};
+          brotliCompressParams[zlib.constants.BROTLI_PARAM_MODE] =
+            zlib.constants.BROTLI_MODE_TEXT;
           await streamPipeline(
             requestStream,
-            zlib.createBrotliCompress(),
+            zlib.createBrotliCompress(brotliCompressParams),
             cacheFileStream
           );
         } else {
