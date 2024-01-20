@@ -12,7 +12,7 @@ import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
-import streamToBuffer from "streamToBuffer.js";
+import streamToBuffer from "./streamToBuffer.js";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>

@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
-    "inlineSourceMap": true,
-    "sourceMap": true
+    "inlineSourceMap": true
   },
   "extends": "./tsconfig.json",
   "include": ["./__tests__/**/*.ts"]

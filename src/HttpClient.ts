@@ -7,6 +7,15 @@ import contentTypeParser from "content-type";
 import {Stream} from "node:stream";
 import zlib from "node:zlib";
 import {pipeline as streamPipeline} from "node:stream/promises";
+import {pino} from "pino";
+import process from "node:process";
+
+const logger = pino({
+  level:
+    process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
+      ? "debug"
+      : "info",
+});
 
 const isTextResponseBody = ({
   contentTypeHeader,
@@ -74,11 +83,12 @@ export default class HttpClient {
   }
 
   async get(url: string): Promise<Stream> {
-    try {
-      return this.getCached(url);
-    } catch {
-      /* empty */
+    const cachedStream = this.getCached(url);
+    if (cachedStream !== null) {
+      logger.info("HTTP client cache hit: %s", url);
+      return cachedStream;
     }
+    logger.info("HTTP client cache miss: %s", url);
 
     switch (process.env.NODE_ENV) {
       case "development":
@@ -92,28 +102,43 @@ export default class HttpClient {
 
     await this.getUncached(url);
 
-    return this.getCached(url);
+    const cacheFileStream = this.getCached(url);
+    invariant(cacheFileStream, "must exist here");
+    return cacheFileStream!;
   }
 
-  private getCached(url: string): Stream {
+  private getCached(url: string): Stream | null {
+    // Checking exists then creating a read stream is not ideal,
+    // but fs.createReadStream doesn't report an error until the stream is read by the caller.
+    // It should be OK, since the cache is supposed to be immutable.
+
     let cacheFilePath = this.cacheFilePath(url);
-    try {
+    if (fs.existsSync(cacheFilePath)) {
+      logger.debug("cache file exists: %s", cacheFilePath);
       return fs.createReadStream(cacheFilePath);
-    } catch {
-      cacheFilePath += ".br";
+    }
+
+    logger.debug("no such cache file: %s", cacheFilePath);
+    cacheFilePath += ".br";
+    if (fs.existsSync(cacheFilePath)) {
+      logger.debug("cache file exists: %s", cacheFilePath);
       return fs
         .createReadStream(cacheFilePath)
         .pipe(zlib.createBrotliDecompress());
     }
+
+    return null;
   }
 
   private async getUncached(url: string): Promise<void> {
+    logger.debug("requesting %s", url);
     const requestStream = this.got.stream(url);
     requestStream.on("response", async (response: Response) => {
       const contentTypeHeader = response.headers["content-type"];
       if (!contentTypeHeader) {
         throw new RangeError("response has no Content-Type header");
       }
+      logger.debug("%s Content-Type: %s", url, contentTypeHeader);
       const compress =
         contentTypeHeader && isTextResponseBody({contentTypeHeader, url});
 
@@ -121,6 +146,7 @@ export default class HttpClient {
       if (compress) {
         cacheFilePath += ".br";
       }
+      logger.debug("%s cache file path: %s", url, cacheFilePath);
 
       requestStream.off("error", (error) => {
         throw error;
