@@ -133,42 +133,54 @@ export default class HttpClient {
   private async getUncached(url: string): Promise<void> {
     logger.debug("requesting %s", url);
     const requestStream = this.got.stream(url);
-    requestStream.on("response", async (response: Response) => {
-      const contentTypeHeader = response.headers["content-type"];
-      if (!contentTypeHeader) {
-        throw new RangeError("response has no Content-Type header");
-      }
-      logger.debug("%s Content-Type: %s", url, contentTypeHeader);
-      const compress =
-        contentTypeHeader && isTextResponseBody({contentTypeHeader, url});
-
-      let cacheFilePath = this.cacheFilePath(url);
-      if (compress) {
-        cacheFilePath += ".br";
-      }
-      logger.debug("%s cache file path: %s", url, cacheFilePath);
-
-      requestStream.off("error", (error) => {
-        throw error;
+    return new Promise((resolve, reject) => {
+      requestStream.on("downloadProgress", ({transferred, total, percent}) => {
+        const percentage = Math.round(percent * 100);
+        logger.info(
+          `${url} download: ${transferred}/${total} (${percentage}%)`
+        );
       });
 
-      await fsPromises.mkdir(path.dirname(cacheFilePath), {recursive: true});
+      requestStream.on("response", async (response: Response) => {
+        const contentTypeHeader = response.headers["content-type"];
+        if (!contentTypeHeader) {
+          throw new RangeError("response has no Content-Type header");
+        }
+        logger.debug("%s Content-Type: %s", url, contentTypeHeader);
+        const compress =
+          contentTypeHeader && isTextResponseBody({contentTypeHeader, url});
 
-      const cacheFileStream = fs.createWriteStream(cacheFilePath);
+        let cacheFilePath = this.cacheFilePath(url);
+        if (compress) {
+          cacheFilePath += ".br";
+        }
+        logger.debug("%s cache file path: %s", url, cacheFilePath);
 
-      if (compress) {
-        await streamPipeline(
-          requestStream,
-          zlib.createBrotliCompress(),
-          cacheFileStream
-        );
-      } else {
-        await streamPipeline(requestStream, cacheFileStream);
-      }
-    });
+        requestStream.off("error", reject);
 
-    requestStream.once("error", (error) => {
-      throw error;
+        const cacheDirPath = path.dirname(cacheFilePath);
+        logger.debug("recursively creating directory: %s", cacheDirPath);
+        await fsPromises.mkdir(cacheDirPath, {recursive: true});
+        logger.debug("recursively created directory: %s", cacheDirPath);
+
+        const cacheFileStream = fs.createWriteStream(cacheFilePath);
+
+        logger.debug("waiting on stream pipeline to %s", cacheFilePath);
+        if (compress) {
+          await streamPipeline(
+            requestStream,
+            zlib.createBrotliCompress(),
+            cacheFileStream
+          );
+        } else {
+          await streamPipeline(requestStream, cacheFileStream);
+        }
+        logger.debug("finished stream pipeline to %s", cacheFilePath);
+
+        resolve();
+      });
+
+      requestStream.once("error", reject);
     });
   }
 }
