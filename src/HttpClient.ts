@@ -9,6 +9,7 @@ import zlib from "node:zlib";
 import {pipeline as streamPipeline} from "node:stream/promises";
 import process from "node:process";
 import logger from "./logger.js";
+import cliProgress from "cli-progress";
 
 const isTextResponseBody = ({
   contentTypeHeader,
@@ -126,12 +127,12 @@ export default class HttpClient {
   private async getUncached(url: string): Promise<void> {
     logger.debug("requesting %s", url);
     const requestStream = this.got.stream(url);
+    const progressBar = new cliProgress.SingleBar({});
+    progressBar.start(100, 0);
     return new Promise((resolve, reject) => {
-      requestStream.on("downloadProgress", ({transferred, total, percent}) => {
+      requestStream.on("downloadProgress", ({percent}) => {
         const percentage = Math.round(percent * 100);
-        logger.info(
-          `${url} download: ${transferred}/${total} (${percentage}%)`
-        );
+        progressBar.update(percentage);
       });
 
       requestStream.on("response", async (response: Response) => {

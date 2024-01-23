@@ -4,10 +4,12 @@
   "description": "TypeScript library and CLI for working with Web Data Commons datasets",
   "dependencies": {
     "@rdfjs/types": "^1.1.0",
+    "@types/cli-progress": "^3.11.5",
     "@types/concat-stream": "2.0.3",
     "@types/content-type": "^1.1.8",
     "@types/n3": "1.16.4",
     "@types/papaparse": "^5.3.14",
+    "cli-progress": "^3.12.0",
     "concat-stream": "^2.0.0",
     "content-type": "^1.0.5",
     "got": "^14.0.0",
