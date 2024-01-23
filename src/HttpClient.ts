@@ -7,15 +7,8 @@ import contentTypeParser from "content-type";
 import {Stream} from "node:stream";
 import zlib from "node:zlib";
 import {pipeline as streamPipeline} from "node:stream/promises";
-import {pino} from "pino";
 import process from "node:process";
-
-const logger = pino({
-  level:
-    process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
-      ? "debug"
-      : "info",
-});
+import logger from "./logger.js";
 
 const isTextResponseBody = ({
   contentTypeHeader,
