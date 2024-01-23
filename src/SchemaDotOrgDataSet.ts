@@ -7,12 +7,15 @@ import {
 } from "node-html-parser";
 import {Memoize} from "typescript-memoize";
 import HttpClient from "./HttpClient.js";
-import {Parser, StreamParser, Store} from "n3";
+import {StreamParser, Store, Quad} from "n3";
 import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
+import {Stream} from "node:stream";
+import cliProgress from "cli-progress";
+import logger from "./logger.js";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -281,41 +284,48 @@ namespace SchemaDotOrgDataSet {
       ).toString("utf8");
     }
 
-    private async sampleNquadsString(): Promise<string> {
-      return (
-        await streamToBuffer(await this.httpClient.get(this.sampleDataFileUrl))
-      ).toString("utf8");
+    private async sampleNquadsStream(): Promise<Stream> {
+      return await this.httpClient.get(this.sampleDataFileUrl);
     }
 
     @Memoize()
     async samplePagesByIri(): Promise<
       Record<string, SchemaDotOrgDataSet.ClassSubset.PageSubset>
     > {
-      const result: Record<string, SchemaDotOrgDataSet.ClassSubset.PageSubset> =
-        {};
-      const parser = new Parser({format: "N-Quads"});
-      parser.parse(await this.sampleNquadsString(), (error, quad) => {
-        if (error) {
-          return;
-          // throw error;
-        } else if (!quad) {
-          return;
-        }
-        const pageIri = quad.graph;
-        if (pageIri.termType !== "NamedNode") {
-          return;
-        }
-        let page = result[pageIri.value];
-        if (!page) {
-          page = result[pageIri.value] =
-            new SchemaDotOrgDataSet.ClassSubset.PageSubset({
-              dataset: new Store(),
-              pageIri,
-            });
-        }
-        (page.dataset as Store).addQuad(quad);
+      const quadStream = (await this.sampleNquadsStream()).pipe(
+        new StreamParser({format: "N-Quads"})
+      );
+      return new Promise((resolve, reject) => {
+        const result: Record<
+          string,
+          SchemaDotOrgDataSet.ClassSubset.PageSubset
+        > = {};
+        quadStream.on("data", (quad) => {
+          const pageIri = quad.graph;
+          if (pageIri.termType !== "NamedNode") {
+            return;
+          }
+          let page = result[pageIri.value];
+          if (!page) {
+            page = result[pageIri.value] =
+              new SchemaDotOrgDataSet.ClassSubset.PageSubset({
+                dataset: new Store(),
+                pageIri,
+              });
+          }
+          (page.dataset as Store).addQuad(quad);
+        });
+        quadStream.on("error", (error) => {
+          logger.error("error parsing %s: %s", this.sampleDataFileUrl, error);
+        });
+        quadStream.on("end", (error: any) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(result);
+          }
+        });
       });
-      return result;
     }
   }
 
@@ -367,15 +377,31 @@ namespace SchemaDotOrgDataSet {
 
       @Memoize()
       async dataset(): Promise<DatasetCore> {
-        const gzStream = await this.httpClient.get(this.dataFileUrl);
+        const quadStream = (await this.httpClient.get(this.dataFileUrl))
+          .pipe(zlib.createGunzip())
+          .pipe(new StreamParser({format: "N-Quads"}));
+        const progressBar = new cliProgress.SingleBar({});
+        progressBar.start(this.stats.quadsOfSubset, 0);
         return new Promise((resolve, reject) => {
-          const inflate = zlib.createInflate();
-          const parser = new StreamParser();
-          const quadStream = gzStream.pipe(inflate).pipe(parser);
-
           const store = new Store();
-          quadStream.on("data", (data) => {
-            console.info("data", data);
+          quadStream.on("data", (quad: Quad) => {
+            progressBar.increment();
+
+            if (quad.graph.termType !== "NamedNode") {
+              return;
+            }
+            let url: URL;
+            try {
+              url = new URL(quad.graph.value);
+            } catch {
+              return;
+            }
+            if (url.hostname.toLowerCase().endsWith(this.domain)) {
+              store.add(quad);
+            }
+          });
+          quadStream.on("error", (error) => {
+            logger.error("error parsing %s: %s", this.dataFileUrl, error);
           });
           quadStream.on("end", (error: any) => {
             if (error) {
