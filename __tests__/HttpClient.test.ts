@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import streamToBuffer from "../src/streamToBuffer.js";
+import ImmutableCache from "../src/ImmutableCache.js";
 
 describe("HttpClient", () => {
   let sut: HttpClient;
@@ -18,11 +19,14 @@ describe("HttpClient", () => {
     cacheDirPath = fs.mkdtempSync(path.join(os.tmpdir(), "HttpClient.test"));
     cacheFilePath = path.join(
       cacheDirPath,
+      "http-client",
       "http",
       "minorgordon.net",
       "index.html"
     );
-    sut = new HttpClient({cacheDirectoryPath: cacheDirPath});
+    sut = new HttpClient({
+      cache: new ImmutableCache({rootDirectoryPath: cacheDirPath}),
+    });
   });
 
   it(

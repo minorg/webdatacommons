@@ -1,15 +1,12 @@
 import got, {ExtendOptions, Got, Response} from "got";
-import path from "node:path";
-import fs from "node:fs";
-import fsPromises from "node:fs/promises";
 import {invariant} from "ts-invariant";
 import contentTypeParser from "content-type";
-import {Stream} from "node:stream";
+import {Readable} from "node:stream";
 import zlib from "node:zlib";
-import {pipeline as streamPipeline} from "node:stream/promises";
 import process from "node:process";
 import logger from "./logger.js";
 import cliProgress from "cli-progress";
+import ImmutableCache from "./ImmutableCache.js";
 
 const isTextResponseBody = ({
   contentTypeHeader,
@@ -46,21 +43,21 @@ const isTextResponseBody = ({
  * - throws an exception if a network request would be made in NODE_ENV=production (i.e., from GitHub Pages, where new files wouldn't be added to the committed cache)
  */
 export default class HttpClient {
-  private readonly cacheDirectoryPath;
+  private readonly cache: ImmutableCache;
   private readonly got: Got;
 
   constructor({
-    cacheDirectoryPath,
+    cache,
     gotOptions,
   }: {
-    cacheDirectoryPath: string;
+    cache: ImmutableCache;
     gotOptions?: ExtendOptions;
   }) {
-    this.cacheDirectoryPath = cacheDirectoryPath;
+    this.cache = cache;
     this.got = gotOptions ? got.extend(gotOptions) : got;
   }
 
-  private cacheFilePath(url: string): string {
+  private cacheKey(url: string, pathSuffix?: string): ImmutableCache.Key {
     const parsedUrl = new URL(url);
     invariant(parsedUrl.hash.length === 0);
     invariant(parsedUrl.password.length === 0);
@@ -68,16 +65,16 @@ export default class HttpClient {
     invariant(parsedUrl.search.length === 0);
     invariant(parsedUrl.username.length === 0);
 
-    return path.join(
-      this.cacheDirectoryPath,
+    return [
+      "http-client",
       parsedUrl.protocol.substring(0, parsedUrl.protocol.length - 1),
       parsedUrl.host,
-      parsedUrl.pathname
-    );
+      parsedUrl.pathname + (pathSuffix ?? ""),
+    ];
   }
 
-  async get(url: string): Promise<Stream> {
-    const cachedStream = this.getCached(url);
+  async get(url: string): Promise<Readable> {
+    const cachedStream = await this.getCached(url);
     if (cachedStream !== null) {
       logger.info("HTTP client cache hit: %s", url);
       return cachedStream;
@@ -96,29 +93,24 @@ export default class HttpClient {
 
     await this.getUncached(url);
 
-    const cacheFileStream = this.getCached(url);
+    const cacheFileStream = await this.getCached(url);
     invariant(cacheFileStream, "must exist here");
     return cacheFileStream!;
   }
 
-  private getCached(url: string): Stream | null {
-    // Checking exists then creating a read stream is not ideal,
-    // but fs.createReadStream doesn't report an error until the stream is read by the caller.
-    // It should be OK, since the cache is supposed to be immutable.
-
-    let cacheFilePath = this.cacheFilePath(url);
-    if (fs.existsSync(cacheFilePath)) {
-      logger.debug("cache file exists: %s", cacheFilePath);
-      return fs.createReadStream(cacheFilePath);
+  private async getCached(url: string): Promise<Readable | null> {
+    {
+      const cacheValue = await this.cache.get(this.cacheKey(url));
+      if (cacheValue !== null) {
+        return cacheValue;
+      }
     }
 
-    logger.debug("no such cache file: %s", cacheFilePath);
-    cacheFilePath += ".br";
-    if (fs.existsSync(cacheFilePath)) {
-      logger.debug("cache file exists: %s", cacheFilePath);
-      return fs
-        .createReadStream(cacheFilePath)
-        .pipe(zlib.createBrotliDecompress());
+    {
+      const cacheValue = await this.cache.get(this.cacheKey(url, ".br"));
+      if (cacheValue !== null) {
+        return cacheValue.pipe(zlib.createBrotliDecompress());
+      }
     }
 
     return null;
@@ -144,35 +136,21 @@ export default class HttpClient {
         const compress =
           contentTypeHeader && isTextResponseBody({contentTypeHeader, url});
 
-        let cacheFilePath = this.cacheFilePath(url);
-        if (compress) {
-          cacheFilePath += ".br";
-        }
-        logger.debug("%s cache file path: %s", url, cacheFilePath);
-
         requestStream.off("error", reject);
 
-        const cacheDirPath = path.dirname(cacheFilePath);
-        logger.debug("recursively creating directory: %s", cacheDirPath);
-        await fsPromises.mkdir(cacheDirPath, {recursive: true});
-        logger.debug("recursively created directory: %s", cacheDirPath);
+        const cacheKey = this.cacheKey(url, compress ? ".br" : undefined);
+        let cacheValue: Readable = requestStream;
 
-        const cacheFileStream = fs.createWriteStream(cacheFilePath);
-
-        logger.debug("waiting on stream pipeline to %s", cacheFilePath);
         if (compress) {
           const brotliCompressParams: Record<number, number> = {};
           brotliCompressParams[zlib.constants.BROTLI_PARAM_MODE] =
             zlib.constants.BROTLI_MODE_TEXT;
-          await streamPipeline(
-            requestStream,
-            zlib.createBrotliCompress(brotliCompressParams),
-            cacheFileStream
+          cacheValue = requestStream.pipe(
+            zlib.createBrotliCompress(brotliCompressParams)
           );
-        } else {
-          await streamPipeline(requestStream, cacheFileStream);
         }
-        logger.debug("finished stream pipeline to %s", cacheFilePath);
+
+        await this.cache.set(cacheKey, cacheValue);
 
         resolve();
       });
