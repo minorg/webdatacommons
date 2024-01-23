@@ -7,17 +7,19 @@ import {
 } from "node-html-parser";
 import {Memoize} from "typescript-memoize";
 import HttpClient from "./HttpClient.js";
-import {StreamParser, Store, Quad, Writer} from "n3";
+import {StreamParser, Store, Quad, Parser, Writer} from "n3";
 import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
-import {Readable, Stream} from "node:stream";
+import {Stream} from "node:stream";
+import fsPromises from "node:fs/promises";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
 import parsePayLevelDomain from "./parsePayLevelDomain.js";
+import split2 from "split2";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -61,6 +63,23 @@ const parseRelatedClassTextNode = (
     name,
     nameLowerCase: name.toLowerCase(),
   };
+};
+
+const appendNQuadToFile = (
+  fileHandle: fsPromises.FileHandle,
+  quad: Quad
+): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const writer = new Writer({format: "N-Quads"});
+    writer.addQuad(quad);
+    writer.end((error, result) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(fileHandle.appendFile(result));
+      }
+    });
+  });
 };
 
 class SchemaDotOrgDataSet {
@@ -450,10 +469,7 @@ namespace SchemaDotOrgDataSet {
         const payLevelDomainNames = new Set(
           Object.keys(await this.parent.payLevelDomainSubsetsByDomain())
         );
-        const quadStream = (await this.httpClient.get(this.dataFileUrl))
-          .pipe(zlib.createGunzip())
-          .pipe(new StreamParser({format: "N-Quads"}));
-        const storesByPayLevelDomainName: Record<string, Store> = {};
+
         const progressBars = new cliProgress.MultiBar({});
         const pldsProgressBar = progressBars.create(
           payLevelDomainNames.size,
@@ -463,13 +479,41 @@ namespace SchemaDotOrgDataSet {
           this.stats.quadsOfSubset,
           0
         );
-        return new Promise((resolve, reject) => {
-          quadStream.on("data", (quad: Quad) => {
+
+        const fileHandlesByPayLevelDomainName: Record<
+          string,
+          fsPromises.FileHandle
+        > = {};
+
+        const lineStream = (await this.httpClient.get(this.dataFileUrl))
+          .pipe(zlib.createGunzip())
+          // Have to parse the N-Quads line-by-line because the N3StreamParser gives up
+          // on the first error instead of simply going to the next line.
+          .pipe(split2());
+
+        const parser = new Parser({format: "N-Quads"});
+
+        try {
+          for await (const line of lineStream) {
             quadsProgressBar.increment();
+
+            let quads: Quad[];
+            try {
+              quads = parser.parse(line);
+            } catch (error) {
+              logger.trace(
+                "error parsing data file %s: %s",
+                this.dataFileUrl,
+                error
+              );
+              return;
+            }
+            invariant(quads.length === 1, "expected one quad per line");
+            const quad = quads[0];
 
             if (quad.graph.termType !== "NamedNode") {
               logger.warn("non-IRI quad graph: ", quad.graph.value);
-              return;
+              continue;
             }
 
             let url: URL;
@@ -477,7 +521,7 @@ namespace SchemaDotOrgDataSet {
               url = new URL(quad.graph.value);
             } catch {
               logger.warn("non-URL IRI: %s", quad.graph.value);
-              return;
+              continue;
             }
 
             const payLevelDomainName = parsePayLevelDomain(url.hostname);
@@ -486,64 +530,43 @@ namespace SchemaDotOrgDataSet {
                 "unable to parse pay-level domain name from URL: %s",
                 quad.graph.value
               );
-              return;
+              continue;
             }
 
             if (!payLevelDomainNames.has(payLevelDomainName)) {
-              logger.warn(
+              logger.trace(
                 "unrecognized pay-level domain name: %s",
                 payLevelDomainName
               );
               return;
             }
 
-            let store = storesByPayLevelDomainName[payLevelDomainName];
-            if (!store) {
-              storesByPayLevelDomainName[payLevelDomainName] = store =
-                new Store();
+            let fileHandle =
+              fileHandlesByPayLevelDomainName[payLevelDomainName];
+            if (!fileHandle) {
+              fileHandlesByPayLevelDomainName[payLevelDomainName] = fileHandle =
+                await this.cache.open(
+                  this.datasetCacheKey(payLevelDomainName),
+                  "w+"
+                );
+
               pldsProgressBar.increment();
-              logger.info(
+              logger.trace(
                 "data file %s: encountered new pay-level domain: %s",
                 this.dataFileUrl,
                 payLevelDomainName
               );
             }
 
-            store.add(quad);
-          });
-          quadStream.on("error", (error) => {
-            logger.error(
-              "error parsing data file %s: %s",
-              this.dataFileUrl,
-              error
-            );
-          });
-          quadStream.on("end", (error: any) => {
-            if (error) {
-              reject(error);
-              return;
-            }
-
-            for (const payLevelDomainName of Object.keys(
-              storesByPayLevelDomainName
-            )) {
-              const quadWriter = new Writer({format: "N-Quads"});
-              for (const quad of storesByPayLevelDomainName[
-                payLevelDomainName
-              ]) {
-                quadWriter.addQuad(quad);
-              }
-              quadWriter.end((_error, result) =>
-                this.cache.set(
-                  this.datasetCacheKey(payLevelDomainName),
-                  Readable.from(Buffer.from(result, "utf-8"))
-                )
-              );
-            }
-
-            resolve();
-          });
-        });
+            await appendNQuadToFile(fileHandle, quad);
+          }
+        } finally {
+          await Promise.all(
+            Object.values(fileHandlesByPayLevelDomainName).map((fileHandle) =>
+              fileHandle.close()
+            )
+          );
+        }
       }
     }
 

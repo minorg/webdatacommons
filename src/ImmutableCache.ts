@@ -36,20 +36,32 @@ class ImmutableCache {
     return path.join(this.rootDirectoryPath, ...key);
   }
 
+  private async mkdirs(key: ImmutableCache.Key): Promise<void> {
+    const dirPath = path.dirname(this.keyToFilePath(key));
+    logger.debug("recursively creating directory: %s", dirPath);
+    await fsPromises.mkdir(dirPath, {recursive: true});
+    logger.debug("recursively created directory: %s", dirPath);
+  }
+
+  async open(
+    key: ImmutableCache.Key,
+    mode?: fs.Mode
+  ): Promise<fsPromises.FileHandle> {
+    await this.mkdirs(key);
+    return fsPromises.open(this.keyToFilePath(key), mode);
+  }
+
   async set(
     key: ImmutableCache.Key,
     value: ImmutableCache.Value
   ): Promise<void> {
-    const filePath = this.keyToFilePath(key);
-
-    const dirPath = path.dirname(filePath);
-    logger.debug("recursively creating directory: %s", dirPath);
-    await fsPromises.mkdir(dirPath, {recursive: true});
-    logger.debug("recursively created directory: %s", dirPath);
-
-    const fileStream = fs.createWriteStream(filePath);
-
-    await streamPipeline([value, fileStream]);
+    await this.mkdirs(key);
+    const fileStream = fs.createWriteStream(this.keyToFilePath(key));
+    try {
+      await streamPipeline([value, fileStream]);
+    } finally {
+      fileStream.close();
+    }
   }
 }
 
