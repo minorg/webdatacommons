@@ -506,7 +506,7 @@ namespace SchemaDotOrgDataSet {
                 this.dataFileUrl,
                 error
               );
-              return;
+              continue;
             }
             invariant(quads.length === 1, "expected one quad per line");
             const quad = quads[0];
@@ -538,7 +538,7 @@ namespace SchemaDotOrgDataSet {
                 "unrecognized pay-level domain name: %s",
                 payLevelDomainName
               );
-              return;
+              continue;
             }
 
             let fileHandle =
