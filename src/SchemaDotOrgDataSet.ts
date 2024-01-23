@@ -7,15 +7,17 @@ import {
 } from "node-html-parser";
 import {Memoize} from "typescript-memoize";
 import HttpClient from "./HttpClient.js";
-import {StreamParser, Store, Quad} from "n3";
+import {StreamParser, Store, Quad, Writer} from "n3";
 import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
-import {Stream} from "node:stream";
+import {Readable, Stream} from "node:stream";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
+import ImmutableCache from "./ImmutableCache.js";
+import parsePayLevelDomain from "./parsePayLevelDomain.js";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -62,16 +64,20 @@ const parseRelatedClassTextNode = (
 };
 
 class SchemaDotOrgDataSet {
+  private readonly cache: ImmutableCache;
   private readonly httpClient: HttpClient;
   readonly version: string;
 
   constructor({
+    cache,
     httpClient,
     version,
   }: {
+    cache: ImmutableCache;
     httpClient: HttpClient;
     version: string;
   }) {
+    this.cache = cache;
     this.httpClient = httpClient;
     this.version = version ?? "2022-12";
   }
@@ -128,6 +134,7 @@ class SchemaDotOrgDataSet {
           tableCells[4].getElementsByTagName("a")[1].attributes["href"];
 
         return new SchemaDotOrgDataSet.ClassSubset({
+          cache: this.cache,
           className: tableRow.getElementsByTagName("th")[0].text,
           downloadDirectoryUrl: downloadHrefs[0],
           generalStats: {
@@ -161,6 +168,7 @@ class SchemaDotOrgDataSet {
 
 namespace SchemaDotOrgDataSet {
   export class ClassSubset {
+    private readonly cache: ImmutableCache;
     readonly className: string;
     private readonly downloadDirectoryUrl: string;
     readonly generalStats: SchemaDotOrgDataSet.ClassSubset.GeneralStats;
@@ -172,16 +180,18 @@ namespace SchemaDotOrgDataSet {
     readonly size: string;
 
     constructor({
+      cache,
       className,
       downloadDirectoryUrl,
       generalStats,
       httpClient,
-      relatedClasses,
       lookupFileUrl,
       pldStatsFileUrl,
+      relatedClasses,
       sampleDataFileUrl,
       size,
     }: {
+      cache: ImmutableCache;
       className: string;
       downloadDirectoryUrl: string;
       generalStats: {
@@ -196,6 +206,7 @@ namespace SchemaDotOrgDataSet {
       sampleDataFileUrl: string;
       size: string;
     }) {
+      this.cache = cache;
       this.className = className;
       this.downloadDirectoryUrl = downloadDirectoryUrl;
       this.generalStats = generalStats;
@@ -261,9 +272,11 @@ namespace SchemaDotOrgDataSet {
 
           map[domain] =
             new SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset({
+              cache: this.cache,
               dataFileUrl: this.downloadDirectoryUrl + "/" + dataFileName,
               domain,
               httpClient: this.httpClient,
+              parent: this,
               stats: {
                 entitiesOfClass: parseInt(row["#Entities of class"]),
                 propertiesAndDensity: parsePldStatsPropertiesAndDensity(
@@ -353,55 +366,74 @@ namespace SchemaDotOrgDataSet {
     }
 
     export class PayLevelDomainSubset {
+      private readonly cache: ImmutableCache;
       private readonly dataFileUrl: string;
       private readonly httpClient: HttpClient;
+      private readonly parent: SchemaDotOrgDataSet.ClassSubset;
       readonly domain: string;
       readonly stats: PayLevelDomainSubset.Stats;
 
       constructor({
+        cache,
         dataFileUrl,
         domain,
         httpClient,
+        parent,
         stats,
       }: {
+        cache: ImmutableCache;
         dataFileUrl: string;
         domain: string;
         httpClient: HttpClient;
+        parent: SchemaDotOrgDataSet.ClassSubset;
         stats: PayLevelDomainSubset.Stats;
       }) {
+        this.cache = cache;
         this.dataFileUrl = dataFileUrl;
         this.domain = domain;
         this.httpClient = httpClient;
+        this.parent = parent;
         this.stats = stats;
       }
 
       @Memoize()
       async dataset(): Promise<DatasetCore> {
-        const quadStream = (await this.httpClient.get(this.dataFileUrl))
-          .pipe(zlib.createGunzip())
-          .pipe(new StreamParser({format: "N-Quads"}));
-        const progressBar = new cliProgress.SingleBar({});
-        progressBar.start(this.stats.quadsOfSubset, 0);
+        {
+          const dataset = await this.datasetCached();
+          if (dataset !== null) {
+            return dataset;
+          }
+        }
+
+        await this.getAndSplitDataFile();
+
+        {
+          const dataset = await this.datasetCached();
+          if (dataset === null) {
+            throw new RangeError(`unable to get ${this.domain} dataset`);
+          }
+          return dataset;
+        }
+      }
+
+      private datasetCacheKey(domain: string): ImmutableCache.Key {
+        return ["pld-datasets", this.parent.className, domain + ".nq"];
+      }
+
+      private async datasetCached(): Promise<DatasetCore | null> {
+        const cacheKey = this.datasetCacheKey(this.domain);
+        const cacheValue = await this.cache.get(cacheKey);
+        if (cacheValue === null) {
+          return null;
+        }
+        const quadStream = cacheValue.pipe(
+          new StreamParser({format: "N-Quads"})
+        );
         return new Promise((resolve, reject) => {
           const store = new Store();
-          quadStream.on("data", (quad: Quad) => {
-            progressBar.increment();
-
-            if (quad.graph.termType !== "NamedNode") {
-              return;
-            }
-            let url: URL;
-            try {
-              url = new URL(quad.graph.value);
-            } catch {
-              return;
-            }
-            if (url.hostname.toLowerCase().endsWith(this.domain)) {
-              store.add(quad);
-            }
-          });
+          quadStream.on("data", store.add);
           quadStream.on("error", (error) => {
-            logger.error("error parsing %s: %s", this.dataFileUrl, error);
+            logger.error("error parsing %s: %s", cacheKey, error);
           });
           quadStream.on("end", (error: any) => {
             if (error) {
@@ -409,6 +441,107 @@ namespace SchemaDotOrgDataSet {
             } else {
               resolve(store);
             }
+          });
+        });
+      }
+
+      private async getAndSplitDataFile(): Promise<void> {
+        // Download the data file and split it into one cached file per PLD.
+        const payLevelDomainNames = new Set(
+          Object.keys(await this.parent.payLevelDomainSubsetsByDomain())
+        );
+        const quadStream = (await this.httpClient.get(this.dataFileUrl))
+          .pipe(zlib.createGunzip())
+          .pipe(new StreamParser({format: "N-Quads"}));
+        const storesByPayLevelDomainName: Record<string, Store> = {};
+        const progressBars = new cliProgress.MultiBar({});
+        const pldsProgressBar = progressBars.create(
+          payLevelDomainNames.size,
+          0
+        );
+        const quadsProgressBar = progressBars.create(
+          this.stats.quadsOfSubset,
+          0
+        );
+        return new Promise((resolve, reject) => {
+          quadStream.on("data", (quad: Quad) => {
+            quadsProgressBar.increment();
+
+            if (quad.graph.termType !== "NamedNode") {
+              logger.warn("non-IRI quad graph: ", quad.graph.value);
+              return;
+            }
+
+            let url: URL;
+            try {
+              url = new URL(quad.graph.value);
+            } catch {
+              logger.warn("non-URL IRI: %s", quad.graph.value);
+              return;
+            }
+
+            const payLevelDomainName = parsePayLevelDomain(url.hostname);
+            if (payLevelDomainName === null) {
+              logger.warn(
+                "unable to parse pay-level domain name from URL: %s",
+                quad.graph.value
+              );
+              return;
+            }
+
+            if (!payLevelDomainNames.has(payLevelDomainName)) {
+              logger.warn(
+                "unrecognized pay-level domain name: %s",
+                payLevelDomainName
+              );
+              return;
+            }
+
+            let store = storesByPayLevelDomainName[payLevelDomainName];
+            if (!store) {
+              storesByPayLevelDomainName[payLevelDomainName] = store =
+                new Store();
+              pldsProgressBar.increment();
+              logger.info(
+                "data file %s: encountered new pay-level domain: %s",
+                this.dataFileUrl,
+                payLevelDomainName
+              );
+            }
+
+            store.add(quad);
+          });
+          quadStream.on("error", (error) => {
+            logger.error(
+              "error parsing data file %s: %s",
+              this.dataFileUrl,
+              error
+            );
+          });
+          quadStream.on("end", (error: any) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+
+            for (const payLevelDomainName of Object.keys(
+              storesByPayLevelDomainName
+            )) {
+              const quadWriter = new Writer({format: "N-Quads"});
+              for (const quad of storesByPayLevelDomainName[
+                payLevelDomainName
+              ]) {
+                quadWriter.addQuad(quad);
+              }
+              quadWriter.end((_error, result) =>
+                this.cache.set(
+                  this.datasetCacheKey(payLevelDomainName),
+                  Readable.from(Buffer.from(result, "utf-8"))
+                )
+              );
+            }
+
+            resolve();
           });
         });
       }

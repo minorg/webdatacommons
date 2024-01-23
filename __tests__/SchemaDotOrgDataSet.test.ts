@@ -61,7 +61,7 @@ describe("SchemaDotOrgDataSet", () => {
       const dataset = await pldSubset.dataset();
       expect(dataset.size).toBeGreaterThan(0);
     },
-    30 * 60 * 1000
+    60 * 60 * 1000
   );
 
   it("gets sample pages", async () => {
