@@ -38,9 +38,9 @@ class ImmutableCache {
 
   private async mkdirs(key: ImmutableCache.Key): Promise<void> {
     const dirPath = path.dirname(this.keyToFilePath(key));
-    logger.debug("recursively creating directory: %s", dirPath);
+    // logger.debug("recursively creating directory: %s", dirPath);
     await fsPromises.mkdir(dirPath, {recursive: true});
-    logger.debug("recursively created directory: %s", dirPath);
+    // logger.debug("recursively created directory: %s", dirPath);
   }
 
   async open(

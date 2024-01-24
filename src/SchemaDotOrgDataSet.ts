@@ -65,23 +65,6 @@ const parseRelatedClassTextNode = (
   };
 };
 
-const appendNQuadToFile = (
-  fileHandle: fsPromises.FileHandle,
-  quad: Quad
-): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    const writer = new Writer({format: "N-Quads"});
-    writer.addQuad(quad);
-    writer.end((error, result) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve(fileHandle.appendFile(result));
-      }
-    });
-  });
-};
-
 class SchemaDotOrgDataSet {
   private readonly cache: ImmutableCache;
   private readonly httpClient: HttpClient;
@@ -492,6 +475,7 @@ namespace SchemaDotOrgDataSet {
           .pipe(split2());
 
         const parser = new Parser({format: "N-Quads"});
+        const writer = new Writer({format: "N-Quads"});
 
         try {
           for await (const line of lineStream) {
@@ -558,7 +542,14 @@ namespace SchemaDotOrgDataSet {
               );
             }
 
-            await appendNQuadToFile(fileHandle, quad);
+            await fileHandle.appendFile(
+              writer.quadToString(
+                quad.subject,
+                quad.predicate,
+                quad.object,
+                quad.graph
+              )
+            );
           }
         } finally {
           await Promise.all(
