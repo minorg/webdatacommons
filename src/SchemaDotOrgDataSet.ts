@@ -14,7 +14,7 @@ import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
 import {Stream} from "node:stream";
-import fsPromises from "node:fs/promises";
+import fs from "node:fs";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
@@ -419,7 +419,7 @@ namespace SchemaDotOrgDataSet {
       }
 
       private datasetCacheKey(domain: string): ImmutableCache.Key {
-        return ["pld-datasets", this.parent.className, domain + ".nq"];
+        return ["pld-datasets", this.parent.className, domain + ".nq.br"];
       }
 
       private async datasetCached(): Promise<DatasetCore | null> {
@@ -477,28 +477,25 @@ namespace SchemaDotOrgDataSet {
         let batch: Batch | null = null;
         // One file per pay level domain name
         // Keep the file handles open in case the quads for a PLD are not contiguous
-        const fileHandlesByPayLevelDomainName: Record<
-          string,
-          fsPromises.FileHandle
-        > = {};
+        const fileStreamsByPayLevelDomainName: Record<string, fs.WriteStream> =
+          {};
         const parser = new Parser({format: "N-Quads"});
         const writer = new Writer({format: "N-Quads"});
 
         const flushBatch = async (batch: Batch) => {
           invariant(batch.quads.length > 0);
 
-          let fileHandle =
-            fileHandlesByPayLevelDomainName[batch.payLevelDomainName];
-          if (fileHandle) {
+          let fileStream =
+            fileStreamsByPayLevelDomainName[batch.payLevelDomainName];
+          if (fileStream) {
             logger.trace(
               "reusing file handle for pay-level domain: %s",
               batch.payLevelDomainName
             );
           } else {
-            fileHandlesByPayLevelDomainName[batch.payLevelDomainName] =
-              fileHandle = await this.cache.open(
-                this.datasetCacheKey(batch.payLevelDomainName),
-                "w+"
+            fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
+              fileStream = await this.cache.createWriteStream(
+                this.datasetCacheKey(batch.payLevelDomainName)
               );
 
             pldsProgressBar.increment();
@@ -509,18 +506,21 @@ namespace SchemaDotOrgDataSet {
             );
           }
 
-          await fileHandle.appendFile(
-            batch.quads
-              .map((quad) =>
-                writer.quadToString(
-                  quad.subject,
-                  quad.predicate,
-                  quad.object,
-                  quad.graph
+          await new Promise((resolve) => {
+            fileStream.write(
+              batch.quads
+                .map((quad) =>
+                  writer.quadToString(
+                    quad.subject,
+                    quad.predicate,
+                    quad.object,
+                    quad.graph
+                  )
                 )
-              )
-              .join("")
-          );
+                .join(""),
+              resolve
+            );
+          });
         };
 
         try {
@@ -607,8 +607,8 @@ namespace SchemaDotOrgDataSet {
           }
         } finally {
           await Promise.all(
-            Object.values(fileHandlesByPayLevelDomainName).map((fileHandle) =>
-              fileHandle.close()
+            Object.values(fileStreamsByPayLevelDomainName).map(
+              (fileStream) => new Promise((resolve) => fileStream.end(resolve))
             )
           );
         }
