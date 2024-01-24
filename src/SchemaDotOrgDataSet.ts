@@ -401,12 +401,10 @@ namespace SchemaDotOrgDataSet {
 
       @Memoize()
       async dataset(): Promise<DatasetCore> {
-        // {
-        //   const dataset = await this.datasetCached();
-        //   if (dataset !== null) {
-        //     return dataset;
-        //   }
-        // }
+        const dataset = await this.datasetCached();
+        if (dataset !== null) {
+          return dataset;
+        }
 
         await this.getAndSplitDataFile();
 
@@ -431,17 +429,21 @@ namespace SchemaDotOrgDataSet {
       }
 
       private async datasetCached(): Promise<DatasetCore | null> {
-        const cacheKey = this.datasetCacheKey(this.domain);
-        const cacheValue = await this.cache.get(cacheKey);
-        if (cacheValue === null) {
+        // The dataset is only considered cached if the compressed version exists,
+        // because that indicates the source data (part_X.gz) was processed completely.
+        const cacheKey = this.datasetCacheKey(this.domain, ".br");
+        const cacheFileStream = await this.cache.get(cacheKey);
+        if (cacheFileStream === null) {
           return null;
         }
-        const quadStream = cacheValue.pipe(
-          new StreamParser({format: "N-Quads"})
-        );
+        const quadStream = cacheFileStream
+          .pipe(zlib.createBrotliDecompress())
+          .pipe(new StreamParser({format: "N-Quads"}));
         return new Promise((resolve, reject) => {
           const store = new Store();
-          quadStream.on("data", store.add);
+          quadStream.on("data", (quad) => {
+            store.add(quad);
+          });
           quadStream.on("error", (error) => {
             logger.error("error parsing %s: %s", cacheKey, error);
           });
@@ -625,12 +627,15 @@ namespace SchemaDotOrgDataSet {
 
           // Finished successfully.
           // Close all open files, compress them, and delete the uncompressed versions.
+          // The file/dataset is only considered cached if the compressed version exists.
           await Promise.all(
-            Object.keys(fileStreamsByPayLevelDomainName).map(
+            [...payLevelDomainNames].map(
               (payLevelDomainName) =>
-                new Promise((resolve, reject) =>
-                  fileStreamsByPayLevelDomainName[payLevelDomainName].end(
-                    () => {
+                new Promise((resolve, reject) => {
+                  const fileStream =
+                    fileStreamsByPayLevelDomainName[payLevelDomainName];
+                  if (fileStream) {
+                    fileStream.end(() => {
                       const uncompressedFilePath = this.cache.filePath(
                         this.datasetCacheKey(payLevelDomainName)
                       );
@@ -641,9 +646,15 @@ namespace SchemaDotOrgDataSet {
                             .then(resolve, reject),
                         reject
                       );
-                    }
-                  )
-                )
+                    });
+                  } else {
+                    logger.error(
+                      "pay-level domain %s not represented in data file %s",
+                      payLevelDomainName,
+                      this.dataFileUrl
+                    );
+                  }
+                })
             )
           );
         } catch (error) {
