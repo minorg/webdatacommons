@@ -11,13 +11,14 @@ import {StreamParser, Store, Quad, Parser, Writer} from "n3";
 import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
-import zlib, {BrotliCompress} from "node:zlib";
+import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
 import {Stream} from "node:stream";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
 import split2 from "split2";
+import fs from "node:fs";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -417,7 +418,7 @@ namespace SchemaDotOrgDataSet {
       }
 
       private datasetCacheKey(domain: string): ImmutableCache.Key {
-        return ["pld-datasets", this.parent.className, domain + ".nq.br"];
+        return ["pld-datasets", this.parent.className, domain + ".nq"];
       }
 
       private async datasetCached(): Promise<DatasetCore | null> {
@@ -488,7 +489,7 @@ namespace SchemaDotOrgDataSet {
         let batch: Batch | null = null;
         // One file per pay level domain name
         // Keep the file handles open in case the quads for a PLD are not contiguous
-        const fileStreamsByPayLevelDomainName: Record<string, BrotliCompress> =
+        const fileStreamsByPayLevelDomainName: Record<string, fs.WriteStream> =
           {};
         const parser = new Parser({format: "N-Quads"});
         const writer = new Writer({format: "N-Quads"});
@@ -504,14 +505,17 @@ namespace SchemaDotOrgDataSet {
               batch.payLevelDomainName
             );
           } else {
-            const brotliCompressParams: Record<number, number> = {};
-            brotliCompressParams[zlib.constants.BROTLI_PARAM_MODE] =
-              zlib.constants.BROTLI_MODE_TEXT;
-            fileStream = zlib.createBrotliCompress(brotliCompressParams);
-            fileStream.pipe(
-              await this.cache.createWriteStream(
-                this.datasetCacheKey(batch.payLevelDomainName)
-              )
+            // const brotliCompressParams: Record<number, number> = {};
+            // brotliCompressParams[zlib.constants.BROTLI_PARAM_MODE] =
+            //   zlib.constants.BROTLI_MODE_TEXT;
+            // fileStream = zlib.createBrotliCompress(brotliCompressParams);
+            // fileStream.pipe(
+            //   await this.cache.createWriteStream(
+            //     this.datasetCacheKey(batch.payLevelDomainName)
+            //   )
+            // );
+            fileStream = await this.cache.createWriteStream(
+              this.datasetCacheKey(batch.payLevelDomainName)
             );
             fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
               fileStream;
@@ -536,7 +540,8 @@ namespace SchemaDotOrgDataSet {
                   )
                 )
                 .join(""),
-              () => fileStream.flush(resolve)
+              () => resolve()
+              // () => fileStream.flush(resolve)
             );
           });
         };
