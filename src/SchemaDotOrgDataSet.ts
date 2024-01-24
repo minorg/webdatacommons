@@ -19,6 +19,7 @@ import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
 import split2 from "split2";
 import fs from "node:fs";
+import brotliCompressTextFile from "./brotliCompressTextFile.js";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -505,15 +506,6 @@ namespace SchemaDotOrgDataSet {
               batch.payLevelDomainName
             );
           } else {
-            // const brotliCompressParams: Record<number, number> = {};
-            // brotliCompressParams[zlib.constants.BROTLI_PARAM_MODE] =
-            //   zlib.constants.BROTLI_MODE_TEXT;
-            // fileStream = zlib.createBrotliCompress(brotliCompressParams);
-            // fileStream.pipe(
-            //   await this.cache.createWriteStream(
-            //     this.datasetCacheKey(batch.payLevelDomainName)
-            //   )
-            // );
             fileStream = await this.cache.createWriteStream(
               this.datasetCacheKey(batch.payLevelDomainName)
             );
@@ -548,6 +540,9 @@ namespace SchemaDotOrgDataSet {
 
         try {
           for await (const line of lineStream) {
+            if (Object.keys(fileStreamsByPayLevelDomainName).length >= 2) {
+              break;
+            }
             quadsProgressBar.increment();
 
             let quads: Quad[];
@@ -620,9 +615,21 @@ namespace SchemaDotOrgDataSet {
             await flushBatch(batch);
           }
         } finally {
+          // Close all open files
+          // Compress the files in separate worker threads
           await Promise.all(
-            Object.values(fileStreamsByPayLevelDomainName).map(
-              (fileStream) => new Promise((resolve) => fileStream.end(resolve))
+            Object.keys(fileStreamsByPayLevelDomainName).map(
+              (payLevelDomainName) =>
+                new Promise((resolve, reject) =>
+                  fileStreamsByPayLevelDomainName[payLevelDomainName].end(
+                    () => {
+                      const filePath = this.cache.filePath(
+                        this.datasetCacheKey(payLevelDomainName)
+                      );
+                      brotliCompressTextFile(filePath).then(resolve, reject);
+                    }
+                  )
+                )
             )
           );
         }

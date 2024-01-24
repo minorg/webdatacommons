@@ -21,10 +21,16 @@ class ImmutableCache {
 
   async createWriteStream(key: ImmutableCache.Key): Promise<fs.WriteStream> {
     await this.mkdirs(key);
-    return fs.createWriteStream(this.filePath(key));
+    const filePath = this.filePath(key);
+    try {
+      await fsPromises.unlink(filePath);
+    } catch {
+      /* empty */
+    }
+    return fs.createWriteStream(filePath, {flags: "w+"});
   }
 
-  private filePath(key: ImmutableCache.Key): string {
+  filePath(key: ImmutableCache.Key): string {
     return path.join(this.rootDirectoryPath, ...key);
   }
 
