@@ -470,7 +470,10 @@ namespace SchemaDotOrgDataSet {
           .pipe(split2());
 
         // Batch quads for a PLD in memory to eliminate some disk writes
-        type Batch = {payLevelDomainName: string; quads: Quad[]};
+        type Batch = {
+          payLevelDomainName: string;
+          quads: Quad[];
+        };
         let batch: Batch | null = null;
         // One file per pay level domain name
         // Keep the file handles open in case the quads for a PLD are not contiguous
@@ -505,8 +508,6 @@ namespace SchemaDotOrgDataSet {
               batch.payLevelDomainName
             );
           }
-
-          // Here: write to store, replacing the graph with http://payleveldomain.com
 
           await fileHandle.appendFile(
             batch.quads
@@ -545,31 +546,51 @@ namespace SchemaDotOrgDataSet {
               continue;
             }
 
-            let url: URL;
-            try {
-              url = new URL(quad.graph.value);
-            } catch {
-              logger.warn("non-URL IRI: %s", quad.graph.value);
-              continue;
-            }
+            let payLevelDomainName: string;
+            if (
+              batch !== null &&
+              quad.graph.value ===
+                batch.quads[batch.quads.length - 1].graph.value
+            ) {
+              // Fast path:
+              // If the quad's graph is the same as the last quad's graph,
+              // reuse the payLevelDomainName instead of parsing it.
+              payLevelDomainName = batch.payLevelDomainName;
+            } else {
+              // Slow path:
+              // New graph. Figure out the payLevelDomainName.
 
-            const payLevelDomainName = parsePayLevelDomain(url.hostname);
-            if (payLevelDomainName === null) {
-              logger.warn(
-                "unable to parse pay-level domain name from URL: %s",
-                quad.graph.value
+              let url: URL;
+              try {
+                url = new URL(quad.graph.value);
+              } catch {
+                logger.warn("non-URL IRI: %s", quad.graph.value);
+                continue;
+              }
+
+              const parsedPayLevelDomainName = parsePayLevelDomain(
+                url.hostname
               );
-              continue;
+              if (parsedPayLevelDomainName === null) {
+                logger.warn(
+                  "unable to parse pay-level domain name from URL: %s",
+                  quad.graph.value
+                );
+                continue;
+              }
+
+              if (!payLevelDomainNames.has(parsedPayLevelDomainName)) {
+                logger.trace(
+                  "unrecognized pay-level domain name: %s",
+                  parsedPayLevelDomainName
+                );
+                continue;
+              }
+
+              payLevelDomainName = parsedPayLevelDomainName;
             }
 
-            if (!payLevelDomainNames.has(payLevelDomainName)) {
-              logger.trace(
-                "unrecognized pay-level domain name: %s",
-                payLevelDomainName
-              );
-              continue;
-            }
-
+            // Add the quad to the batch
             if (batch === null) {
               batch = {payLevelDomainName, quads: [quad]};
             } else if (batch.payLevelDomainName === payLevelDomainName) {
