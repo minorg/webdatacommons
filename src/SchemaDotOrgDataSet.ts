@@ -17,7 +17,6 @@ import {Stream} from "node:stream";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
-import parsePayLevelDomain from "./parsePayLevelDomain.js";
 import split2 from "split2";
 
 // Utility functions
@@ -451,6 +450,19 @@ namespace SchemaDotOrgDataSet {
         const payLevelDomainNames = new Set(
           Object.keys(await this.parent.payLevelDomainSubsetsByDomain())
         );
+        const lookupPayLevelDomainName = (hostname: string): string | null => {
+          // We know the universe of pay-level domains that are supposed to be in this data file.
+          // Rather than parsing the pay-level domain from the URL hostname,
+          // which involves Public Suffix List lookups,
+          // go through the universe of PLDs we expect to find.
+          for (let i = 0; i < hostname.length; i++) {
+            const hostnameSuffix = hostname.substring(i);
+            if (payLevelDomainNames.has(hostnameSuffix)) {
+              return hostnameSuffix;
+            }
+          }
+          return null;
+        };
 
         const progressBars = new cliProgress.MultiBar({});
         const pldsProgressBar = progressBars.create(
@@ -574,26 +586,17 @@ namespace SchemaDotOrgDataSet {
                 continue;
               }
 
-              const parsedPayLevelDomainName = parsePayLevelDomain(
+              const payLevelDomainNameLookup = lookupPayLevelDomainName(
                 url.hostname
               );
-              if (parsedPayLevelDomainName === null) {
+              if (payLevelDomainNameLookup === null) {
                 logger.warn(
-                  "unable to parse pay-level domain name from URL: %s",
+                  "no known pay-level domain name in URL: %s",
                   quad.graph.value
                 );
                 continue;
               }
-
-              if (!payLevelDomainNames.has(parsedPayLevelDomainName)) {
-                logger.trace(
-                  "unrecognized pay-level domain name: %s",
-                  parsedPayLevelDomainName
-                );
-                continue;
-              }
-
-              payLevelDomainName = parsedPayLevelDomainName;
+              payLevelDomainName = payLevelDomainNameLookup;
             }
 
             // Add the quad to the batch
