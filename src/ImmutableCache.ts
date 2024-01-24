@@ -15,8 +15,16 @@ class ImmutableCache {
     this.rootDirectoryPath = rootDirectoryPath;
   }
 
+  dirPath(key: ImmutableCache.Key): string {
+    return path.dirname(this.filePath(key));
+  }
+
+  filePath(key: ImmutableCache.Key): string {
+    return path.join(this.rootDirectoryPath, ...key);
+  }
+
   async get(key: ImmutableCache.Key): Promise<ImmutableCache.Value | null> {
-    const filePath = this.keyToFilePath(key);
+    const filePath = this.filePath(key);
 
     // Checking exists then creating a read stream is not ideal,
     // but fs.createReadStream doesn't report an error until the stream is read by the caller.
@@ -32,12 +40,8 @@ class ImmutableCache {
     return fs.createReadStream(filePath);
   }
 
-  private keyToFilePath(key: ImmutableCache.Key): string {
-    return path.join(this.rootDirectoryPath, ...key);
-  }
-
   private async mkdirs(key: ImmutableCache.Key): Promise<void> {
-    const dirPath = path.dirname(this.keyToFilePath(key));
+    const dirPath = this.dirPath(key);
     // logger.debug("recursively creating directory: %s", dirPath);
     await fsPromises.mkdir(dirPath, {recursive: true});
     // logger.debug("recursively created directory: %s", dirPath);
@@ -48,7 +52,7 @@ class ImmutableCache {
     mode?: fs.Mode
   ): Promise<fsPromises.FileHandle> {
     await this.mkdirs(key);
-    return fsPromises.open(this.keyToFilePath(key), mode);
+    return fsPromises.open(this.filePath(key), mode);
   }
 
   async set(
@@ -56,7 +60,7 @@ class ImmutableCache {
     value: ImmutableCache.Value
   ): Promise<void> {
     await this.mkdirs(key);
-    const fileStream = fs.createWriteStream(this.keyToFilePath(key));
+    const fileStream = fs.createWriteStream(this.filePath(key));
     try {
       await streamPipeline([value, fileStream]);
     } finally {

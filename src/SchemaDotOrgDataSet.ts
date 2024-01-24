@@ -463,19 +463,64 @@ namespace SchemaDotOrgDataSet {
           0
         );
 
-        const fileHandlesByPayLevelDomainName: Record<
-          string,
-          fsPromises.FileHandle
-        > = {};
-
         const lineStream = (await this.httpClient.get(this.dataFileUrl))
           .pipe(zlib.createGunzip())
           // Have to parse the N-Quads line-by-line because the N3StreamParser gives up
           // on the first error instead of simply going to the next line.
           .pipe(split2());
 
+        // Batch quads for a PLD in memory to eliminate some disk writes
+        type Batch = {payLevelDomainName: string; quads: Quad[]};
+        let batch: Batch | null = null;
+        // One file per pay level domain name
+        // Keep the file handles open in case the quads for a PLD are not contiguous
+        const fileHandlesByPayLevelDomainName: Record<
+          string,
+          fsPromises.FileHandle
+        > = {};
         const parser = new Parser({format: "N-Quads"});
         const writer = new Writer({format: "N-Quads"});
+
+        const flushBatch = async (batch: Batch) => {
+          invariant(batch.quads.length > 0);
+
+          let fileHandle =
+            fileHandlesByPayLevelDomainName[batch.payLevelDomainName];
+          if (fileHandle) {
+            logger.debug(
+              "reusing file handle for pay-level domain: %s",
+              batch.payLevelDomainName
+            );
+          } else {
+            fileHandlesByPayLevelDomainName[batch.payLevelDomainName] =
+              fileHandle = await this.cache.open(
+                this.datasetCacheKey(batch.payLevelDomainName),
+                "w+"
+              );
+
+            pldsProgressBar.increment();
+            logger.trace(
+              "data file %s: encountered new pay-level domain: %s",
+              this.dataFileUrl,
+              batch.payLevelDomainName
+            );
+          }
+
+          // Here: write to store, replacing the graph with http://payleveldomain.com
+
+          await fileHandle.appendFile(
+            batch.quads
+              .map((quad) =>
+                writer.quadToString(
+                  quad.subject,
+                  quad.predicate,
+                  quad.object,
+                  quad.graph
+                )
+              )
+              .join("")
+          );
+        };
 
         try {
           for await (const line of lineStream) {
@@ -525,31 +570,21 @@ namespace SchemaDotOrgDataSet {
               continue;
             }
 
-            let fileHandle =
-              fileHandlesByPayLevelDomainName[payLevelDomainName];
-            if (!fileHandle) {
-              fileHandlesByPayLevelDomainName[payLevelDomainName] = fileHandle =
-                await this.cache.open(
-                  this.datasetCacheKey(payLevelDomainName),
-                  "w+"
-                );
-
-              pldsProgressBar.increment();
-              logger.trace(
-                "data file %s: encountered new pay-level domain: %s",
-                this.dataFileUrl,
-                payLevelDomainName
-              );
+            if (batch === null) {
+              batch = {payLevelDomainName, quads: [quad]};
+              continue;
+            } else if (batch.payLevelDomainName === payLevelDomainName) {
+              batch.quads.push(quad);
+              continue;
+            } else {
+              // Flush the batch and start a new batch
+              await flushBatch(batch);
+              batch = {payLevelDomainName, quads: []};
             }
+          }
 
-            await fileHandle.appendFile(
-              writer.quadToString(
-                quad.subject,
-                quad.predicate,
-                quad.object,
-                quad.graph
-              )
-            );
+          if (batch !== null) {
+            await flushBatch(batch);
           }
         } finally {
           await Promise.all(
