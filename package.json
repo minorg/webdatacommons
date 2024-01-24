@@ -17,7 +17,6 @@
     "n3": "^1.17.2",
     "node-html-parser": "^6.1.11",
     "papaparse": "^5.4.1",
-    "parse-domain": "^8.0.1",
     "pino": "^8.17.2",
     "split2": "^4.2.0",
     "ts-invariant": "^0.10.3",
