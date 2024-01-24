@@ -21,7 +21,8 @@
     "pino": "^8.17.2",
     "split2": "^4.2.0",
     "ts-invariant": "^0.10.3",
-    "typescript-memoize": "^1.1.1"
+    "typescript-memoize": "^1.1.1",
+    "v8-profiler-next": "^1.10.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.11",

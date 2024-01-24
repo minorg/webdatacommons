@@ -1,4 +1,5 @@
 coverage/
+*.cpuprofile
 dist/
 *.log
 node_modules/
