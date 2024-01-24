@@ -22,11 +22,6 @@ class ImmutableCache {
   async createWriteStream(key: ImmutableCache.Key): Promise<fs.WriteStream> {
     await this.mkdirs(key);
     const filePath = this.filePath(key);
-    try {
-      await fsPromises.unlink(filePath);
-    } catch {
-      /* empty */
-    }
     return fs.createWriteStream(filePath, {flags: "w+"});
   }
 

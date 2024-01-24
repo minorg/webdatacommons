@@ -19,6 +19,7 @@ import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
 import split2 from "split2";
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import brotliCompressTextFile from "./brotliCompressTextFile.js";
 
 // Utility functions
@@ -400,12 +401,12 @@ namespace SchemaDotOrgDataSet {
 
       @Memoize()
       async dataset(): Promise<DatasetCore> {
-        {
-          const dataset = await this.datasetCached();
-          if (dataset !== null) {
-            return dataset;
-          }
-        }
+        // {
+        //   const dataset = await this.datasetCached();
+        //   if (dataset !== null) {
+        //     return dataset;
+        //   }
+        // }
 
         await this.getAndSplitDataFile();
 
@@ -418,8 +419,15 @@ namespace SchemaDotOrgDataSet {
         }
       }
 
-      private datasetCacheKey(domain: string): ImmutableCache.Key {
-        return ["pld-datasets", this.parent.className, domain + ".nq"];
+      private datasetCacheKey(
+        domain: string,
+        fileNameSuffix?: string
+      ): ImmutableCache.Key {
+        return [
+          "pld-datasets",
+          this.parent.className,
+          domain + ".nq" + (fileNameSuffix ?? ""),
+        ];
       }
 
       private async datasetCached(): Promise<DatasetCore | null> {
@@ -614,20 +622,44 @@ namespace SchemaDotOrgDataSet {
           if (batch !== null) {
             await flushBatch(batch);
           }
-        } finally {
-          // Close all open files
-          // Compress the files in separate worker threads
+
+          // Finished successfully.
+          // Close all open files, compress them, and delete the uncompressed versions.
           await Promise.all(
             Object.keys(fileStreamsByPayLevelDomainName).map(
               (payLevelDomainName) =>
                 new Promise((resolve, reject) =>
                   fileStreamsByPayLevelDomainName[payLevelDomainName].end(
                     () => {
-                      const filePath = this.cache.filePath(
+                      const uncompressedFilePath = this.cache.filePath(
                         this.datasetCacheKey(payLevelDomainName)
                       );
-                      brotliCompressTextFile(filePath).then(resolve, reject);
+                      brotliCompressTextFile(uncompressedFilePath).then(
+                        () =>
+                          fsPromises
+                            .unlink(uncompressedFilePath)
+                            .then(resolve, reject),
+                        reject
+                      );
                     }
+                  )
+                )
+            )
+          );
+        } catch (error) {
+          logger.error(
+            "error processing data file %s: %s",
+            this.dataFileUrl,
+            error
+          );
+
+          // Close all open files
+          await Promise.all(
+            Object.keys(fileStreamsByPayLevelDomainName).map(
+              (payLevelDomainName) =>
+                new Promise((resolve) =>
+                  fileStreamsByPayLevelDomainName[payLevelDomainName].end(
+                    resolve
                   )
                 )
             )
