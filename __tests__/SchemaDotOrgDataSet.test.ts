@@ -1,6 +1,8 @@
 import SchemaDotOrgDataSet from "../src/SchemaDotOrgDataSet.js";
 import WebDataCommons from "../src/WebDataCommons.js";
 import cacheDirectoryPath from "./cacheDirectoryPath.js";
+import v8Profiler from "v8-profiler-next";
+import fs from "node:fs";
 
 describe("SchemaDotOrgDataSet", () => {
   let classSubsets: readonly SchemaDotOrgDataSet.ClassSubset[];
@@ -54,6 +56,29 @@ describe("SchemaDotOrgDataSet", () => {
       if (process.env.CI) {
         return;
       }
+
+      v8Profiler.setGenerateType(1);
+
+      const profileTitle = "get-pld-dataset";
+      v8Profiler.startProfiling(profileTitle, true);
+      setTimeout(
+        () => {
+          const profile = v8Profiler.stopProfiling(profileTitle);
+          profile.export(function (error, result) {
+            // if it doesn't have the extension .cpuprofile then
+            // chrome's profiler tool won't like it.
+            // examine the profile:
+            //   Navigate to chrome://inspect
+            //   Click Open dedicated DevTools for Node
+            //   Select the profiler tab
+            //   Load your file
+            // @ts-expect-error
+            fs.writeFileSync(`${profileTitle}.cpuprofile`, result);
+            profile.delete();
+          });
+        },
+        5 * 60 * 1000
+      );
       const pldSubset = (
         await administrativeAreaClassSubset.payLevelDomainSubsetsByDomain()
       )["balsamohomes.com"];
