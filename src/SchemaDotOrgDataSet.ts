@@ -487,7 +487,7 @@ namespace SchemaDotOrgDataSet {
           let fileHandle =
             fileHandlesByPayLevelDomainName[batch.payLevelDomainName];
           if (fileHandle) {
-            logger.debug(
+            logger.trace(
               "reusing file handle for pay-level domain: %s",
               batch.payLevelDomainName
             );
@@ -572,14 +572,12 @@ namespace SchemaDotOrgDataSet {
 
             if (batch === null) {
               batch = {payLevelDomainName, quads: [quad]};
-              continue;
             } else if (batch.payLevelDomainName === payLevelDomainName) {
               batch.quads.push(quad);
-              continue;
             } else {
               // Flush the batch and start a new batch
               await flushBatch(batch);
-              batch = {payLevelDomainName, quads: []};
+              batch = {payLevelDomainName, quads: [quad]};
             }
           }
 
