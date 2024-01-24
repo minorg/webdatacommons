@@ -11,10 +11,9 @@ import {StreamParser, Store, Quad, Parser, Writer} from "n3";
 import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
-import zlib from "node:zlib";
+import zlib, {BrotliCompress} from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
 import {Stream} from "node:stream";
-import fs from "node:fs";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
@@ -477,7 +476,7 @@ namespace SchemaDotOrgDataSet {
         let batch: Batch | null = null;
         // One file per pay level domain name
         // Keep the file handles open in case the quads for a PLD are not contiguous
-        const fileStreamsByPayLevelDomainName: Record<string, fs.WriteStream> =
+        const fileStreamsByPayLevelDomainName: Record<string, BrotliCompress> =
           {};
         const parser = new Parser({format: "N-Quads"});
         const writer = new Writer({format: "N-Quads"});
@@ -493,10 +492,17 @@ namespace SchemaDotOrgDataSet {
               batch.payLevelDomainName
             );
           } else {
-            fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
-              fileStream = await this.cache.createWriteStream(
+            const brotliCompressParams: Record<number, number> = {};
+            brotliCompressParams[zlib.constants.BROTLI_PARAM_MODE] =
+              zlib.constants.BROTLI_MODE_TEXT;
+            fileStream = zlib.createBrotliCompress(brotliCompressParams);
+            fileStream.pipe(
+              await this.cache.createWriteStream(
                 this.datasetCacheKey(batch.payLevelDomainName)
-              );
+              )
+            );
+            fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
+              fileStream;
 
             pldsProgressBar.increment();
             logger.trace(
@@ -506,7 +512,7 @@ namespace SchemaDotOrgDataSet {
             );
           }
 
-          await new Promise((resolve) => {
+          await new Promise<void>((resolve) => {
             fileStream.write(
               batch.quads
                 .map((quad) =>
@@ -518,7 +524,7 @@ namespace SchemaDotOrgDataSet {
                   )
                 )
                 .join(""),
-              resolve
+              () => fileStream.flush(resolve)
             );
           });
         };
