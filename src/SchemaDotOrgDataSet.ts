@@ -498,15 +498,11 @@ namespace SchemaDotOrgDataSet {
         };
 
         const progressBars = new cliProgress.MultiBar({
-          format: `Get/split ${this.parent.className} ${this.dataFileName} {metric} [{bar}] {percentage}% | ETA: {eta}s | {value}/{total}`,
+          format: `Get/split ${this.parent.className} ${this.dataFileName} {metric} [{bar}] {percentage}% | {value}/{total}`,
           stream: this.showProgress ? process.stderr : devNull,
         });
         const pldsProgressBar = progressBars.create(
           payLevelDomainNames.size,
-          0
-        );
-        const quadsProgressBar = progressBars.create(
-          this.stats.quadsOfSubset,
           0
         );
 
@@ -546,7 +542,7 @@ namespace SchemaDotOrgDataSet {
             fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
               fileStream;
 
-            pldsProgressBar.increment({metric: "pay-level domains"});
+            pldsProgressBar.increment({metric: "pay-level domains seen"});
             logger.trace(
               "data file %s: encountered new pay-level domain: %s",
               this.dataFileUrl,
@@ -574,11 +570,6 @@ namespace SchemaDotOrgDataSet {
 
         try {
           for await (const line of lineStream) {
-            // if (Object.keys(fileStreamsByPayLevelDomainName).length >= 2) {
-            //   break;
-            // }
-            quadsProgressBar.increment({metric: "quads"});
-
             let quads: Quad[];
             try {
               quads = parser.parse(line);
