@@ -1,2 +1,7 @@
+coverage/
+*.cpuprofile
 dist/
+*.log
 node_modules/
+__tests__/cache/**/*.gz
+__tests__/cache/**/*.nq*
