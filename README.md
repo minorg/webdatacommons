@@ -8,8 +8,18 @@ TypeScript library and CLI for working with Web Data Commons datasets
 
 ## Usage
 
+### From JavaScript/TypeScript
+
 ```typescript
 import WebDataCommons from "webdatacommons";
 
-const classSubets = new WebDataCommons({cacheDirectoryPath: "path/to/directory"}).schemaDotOrgDataSet();
+const classSubsets = await new WebDataCommons({cacheDirectoryPath: "path/to/directory"}).schemaDotOrgDataSet().classSubsets();
+```
+
+### From the command line
+
+Extract quads for the pay-level domain `balsamohomes.com` from the `AdministrativeArea` class-specific subset and print them to the console:
+
+```bash
+    webdatacommons schema.org extract -c AdministrativeArea -d balsamohomes.com
 ```

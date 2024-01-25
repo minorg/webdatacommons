@@ -498,7 +498,7 @@ namespace SchemaDotOrgDataSet {
         };
 
         const progressBars = new cliProgress.MultiBar({
-          format: `Get/split ${this.parent.className} ${this.dataFileName} {metric} [{bar}] {percentage}% | {value}/{total}`,
+          format: `Split ${this.parent.className} ${this.dataFileName} {metric} [{bar}] {percentage}% | {value}/{total}`,
           stream: this.showProgress ? process.stderr : devNull,
         });
         const pldsProgressBar = progressBars.create(
