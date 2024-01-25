@@ -49,6 +49,7 @@ const extractSchemaDotOrgCommand = command({
   handler: async function (args) {
     const dataSet = new WebDataCommons({
       cacheDirectoryPath: args.cacheDirectoryPath,
+      showProgress: true,
     }).schemaDotOrgDataSet({version: args.dataSetVersion});
 
     const classSubset = (await dataSet.classSubsetsByClassName())[args.class];

@@ -21,6 +21,8 @@ import split2 from "split2";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import brotliCompressTextFile from "./brotliCompressTextFile.js";
+// @ts-expect-error No types
+import devNull from "dev-null";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -69,19 +71,23 @@ const parseRelatedClassTextNode = (
 class SchemaDotOrgDataSet {
   private readonly cache: ImmutableCache;
   private readonly httpClient: HttpClient;
+  private readonly showProgress: boolean;
   readonly version: string;
 
   constructor({
     cache,
     httpClient,
+    showProgress,
     version,
   }: {
     cache: ImmutableCache;
     httpClient: HttpClient;
+    showProgress: boolean;
     version: string;
   }) {
     this.cache = cache;
     this.httpClient = httpClient;
+    this.showProgress = showProgress;
     this.version = version ?? "2022-12";
   }
 
@@ -150,6 +156,7 @@ class SchemaDotOrgDataSet {
           pldStatsFileUrl,
           relatedClasses,
           sampleDataFileUrl: downloadHrefs[1],
+          showProgress: this.showProgress,
           size: sizeCell.text,
         });
       });
@@ -180,6 +187,7 @@ namespace SchemaDotOrgDataSet {
     private readonly lookupFileUrl: string;
     readonly relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
     private readonly sampleDataFileUrl: string;
+    private readonly showProgress: boolean;
     readonly size: string;
 
     constructor({
@@ -192,6 +200,7 @@ namespace SchemaDotOrgDataSet {
       pldStatsFileUrl,
       relatedClasses,
       sampleDataFileUrl,
+      showProgress,
       size,
     }: {
       cache: ImmutableCache;
@@ -207,6 +216,7 @@ namespace SchemaDotOrgDataSet {
       pldStatsFileUrl: string;
       relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
       sampleDataFileUrl: string;
+      showProgress: boolean;
       size: string;
     }) {
       this.cache = cache;
@@ -218,6 +228,7 @@ namespace SchemaDotOrgDataSet {
       this.pldStatsFileUrl = pldStatsFileUrl;
       this.relatedClasses = relatedClasses;
       this.sampleDataFileUrl = sampleDataFileUrl;
+      this.showProgress = showProgress;
       this.size = size;
     }
 
@@ -276,10 +287,12 @@ namespace SchemaDotOrgDataSet {
           map[domain] =
             new SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset({
               cache: this.cache,
+              dataFileName,
               dataFileUrl: this.downloadDirectoryUrl + "/" + dataFileName,
               domain,
               httpClient: this.httpClient,
               parent: this,
+              showProgress: this.showProgress,
               stats: {
                 entitiesOfClass: parseInt(row["#Entities of class"]),
                 propertiesAndDensity: parsePldStatsPropertiesAndDensity(
@@ -370,32 +383,40 @@ namespace SchemaDotOrgDataSet {
 
     export class PayLevelDomainSubset {
       private readonly cache: ImmutableCache;
+      private readonly dataFileName: string;
       private readonly dataFileUrl: string;
       private readonly httpClient: HttpClient;
       private readonly parent: SchemaDotOrgDataSet.ClassSubset;
       readonly domain: string;
+      private readonly showProgress: boolean;
       readonly stats: PayLevelDomainSubset.Stats;
 
       constructor({
         cache,
+        dataFileName,
         dataFileUrl,
         domain,
         httpClient,
         parent,
+        showProgress,
         stats,
       }: {
         cache: ImmutableCache;
+        dataFileName: string;
         dataFileUrl: string;
         domain: string;
         httpClient: HttpClient;
         parent: SchemaDotOrgDataSet.ClassSubset;
+        showProgress: boolean;
         stats: PayLevelDomainSubset.Stats;
       }) {
         this.cache = cache;
+        this.dataFileName = dataFileName;
         this.dataFileUrl = dataFileUrl;
         this.domain = domain;
         this.httpClient = httpClient;
         this.parent = parent;
+        this.showProgress = showProgress;
         this.stats = stats;
       }
 
@@ -476,7 +497,10 @@ namespace SchemaDotOrgDataSet {
           return null;
         };
 
-        const progressBars = new cliProgress.MultiBar({});
+        const progressBars = new cliProgress.MultiBar({
+          format: `Get/split ${this.parent.className} ${this.dataFileName} {metric} [{bar}] {percentage}% | ETA: {eta}s | {value}/{total}`,
+          stream: this.showProgress ? process.stderr : devNull,
+        });
         const pldsProgressBar = progressBars.create(
           payLevelDomainNames.size,
           0
@@ -522,7 +546,7 @@ namespace SchemaDotOrgDataSet {
             fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
               fileStream;
 
-            pldsProgressBar.increment();
+            pldsProgressBar.increment({metric: "pay-level domains"});
             logger.trace(
               "data file %s: encountered new pay-level domain: %s",
               this.dataFileUrl,
@@ -553,7 +577,7 @@ namespace SchemaDotOrgDataSet {
             // if (Object.keys(fileStreamsByPayLevelDomainName).length >= 2) {
             //   break;
             // }
-            quadsProgressBar.increment();
+            quadsProgressBar.increment({metric: "quads"});
 
             let quads: Quad[];
             try {
@@ -650,7 +674,9 @@ namespace SchemaDotOrgDataSet {
                       brotliCompressTextFile(uncompressedFilePath).then(
                         () =>
                           fsPromises.unlink(uncompressedFilePath).then(() => {
-                            closeProgressBar.increment();
+                            closeProgressBar.increment({
+                              metric: "files closed and compressed",
+                            });
                             resolve();
                           }, reject),
                         reject

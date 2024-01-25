@@ -17,6 +17,7 @@
     "cmd-ts": "^0.13.0",
     "concat-stream": "^2.0.0",
     "content-type": "^1.0.5",
+    "dev-null": "^0.1.1",
     "global-cache-dir": "^6.0.0",
     "got": "^14.0.0",
     "n3": "^1.17.2",

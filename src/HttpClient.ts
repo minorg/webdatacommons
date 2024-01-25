@@ -7,6 +7,8 @@ import process from "node:process";
 import logger from "./logger.js";
 import cliProgress from "cli-progress";
 import ImmutableCache from "./ImmutableCache.js";
+// @ts-expect-error No types
+import devNull from "dev-null";
 
 const isTextResponseBody = ({
   contentTypeHeader,
@@ -45,16 +47,24 @@ const isTextResponseBody = ({
 export default class HttpClient {
   private readonly cache: ImmutableCache;
   private readonly got: Got;
+  private readonly showProgress: boolean;
 
   constructor({
     cache,
-    gotOptions,
+    options,
   }: {
     cache: ImmutableCache;
-    gotOptions?: ExtendOptions;
+    options?: ExtendOptions & {showProgress?: boolean};
   }) {
     this.cache = cache;
-    this.got = gotOptions ? got.extend(gotOptions) : got;
+    if (options) {
+      const {showProgress, ...gotOptions} = options;
+      this.got = got.extend(gotOptions);
+      this.showProgress = !!showProgress;
+    } else {
+      this.got = got;
+      this.showProgress = false;
+    }
   }
 
   private cacheKey(url: string, pathSuffix?: string): ImmutableCache.Key {
@@ -81,14 +91,16 @@ export default class HttpClient {
     }
     logger.info("HTTP client cache miss: %s", url);
 
-    switch (process.env.NODE_ENV) {
-      case "development":
-      case "test":
-        break;
-      default:
-        throw new Error(
-          `refusing to make network request for ${url} in environment ${process.env.NODE_ENV}`
-        );
+    if (process.env.NODE_ENV) {
+      switch (process.env.NODE_ENV) {
+        case "development":
+        case "test":
+          break;
+        default:
+          throw new Error(
+            `refusing to make network request for ${url} in environment ${process.env.NODE_ENV}`
+          );
+      }
     }
 
     await this.getUncached(url);
@@ -119,12 +131,15 @@ export default class HttpClient {
   private async getUncached(url: string): Promise<void> {
     logger.debug("requesting %s", url);
     const requestStream = this.got.stream(url);
-    const progressBar = new cliProgress.SingleBar({});
+    const progressBar = new cliProgress.SingleBar({
+      format: "{url} | {bar} | {value}/{total}",
+      stream: this.showProgress ? process.stderr : devNull,
+    });
     progressBar.start(100, 0);
     return new Promise((resolve, reject) => {
       requestStream.on("downloadProgress", ({percent}) => {
         const percentage = Math.round(percent * 100);
-        progressBar.update(percentage);
+        progressBar.update(percentage, {url});
       });
 
       requestStream.on("response", async (response: Response) => {
