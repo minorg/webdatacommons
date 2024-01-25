@@ -550,9 +550,9 @@ namespace SchemaDotOrgDataSet {
 
         try {
           for await (const line of lineStream) {
-            if (Object.keys(fileStreamsByPayLevelDomainName).length >= 2) {
-              break;
-            }
+            // if (Object.keys(fileStreamsByPayLevelDomainName).length >= 2) {
+            //   break;
+            // }
             quadsProgressBar.increment();
 
             let quads: Quad[];
@@ -628,10 +628,18 @@ namespace SchemaDotOrgDataSet {
           // Finished successfully.
           // Close all open files, compress them, and delete the uncompressed versions.
           // The file/dataset is only considered cached if the compressed version exists.
+          logger.info(
+            "closing and compressing %d files",
+            payLevelDomainNames.size
+          );
+          const closeProgressBar = progressBars.create(
+            payLevelDomainNames.size,
+            0
+          );
           await Promise.all(
             [...payLevelDomainNames].map(
               (payLevelDomainName) =>
-                new Promise((resolve, reject) => {
+                new Promise<void>((resolve, reject) => {
                   const fileStream =
                     fileStreamsByPayLevelDomainName[payLevelDomainName];
                   if (fileStream) {
@@ -641,9 +649,10 @@ namespace SchemaDotOrgDataSet {
                       );
                       brotliCompressTextFile(uncompressedFilePath).then(
                         () =>
-                          fsPromises
-                            .unlink(uncompressedFilePath)
-                            .then(resolve, reject),
+                          fsPromises.unlink(uncompressedFilePath).then(() => {
+                            closeProgressBar.increment();
+                            resolve();
+                          }, reject),
                         reject
                       );
                     });
@@ -657,6 +666,10 @@ namespace SchemaDotOrgDataSet {
                 })
             )
           );
+          logger.info(
+            "closed and compressed %d files",
+            Object.keys(fileStreamsByPayLevelDomainName).length
+          );
         } catch (error) {
           logger.error(
             "error processing data file %s: %s",
@@ -665,16 +678,14 @@ namespace SchemaDotOrgDataSet {
           );
 
           // Close all open files
+          const fileStreams = Object.values(fileStreamsByPayLevelDomainName);
+          logger.debug("closing %d files", fileStreams.length);
           await Promise.all(
-            Object.keys(fileStreamsByPayLevelDomainName).map(
-              (payLevelDomainName) =>
-                new Promise((resolve) =>
-                  fileStreamsByPayLevelDomainName[payLevelDomainName].end(
-                    resolve
-                  )
-                )
+            fileStreams.map(
+              (fileStream) => new Promise((resolve) => fileStream.end(resolve))
             )
           );
+          logger.debug("closed %d files", fileStreams.length);
         }
       }
     }

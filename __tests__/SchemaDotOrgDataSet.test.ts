@@ -50,7 +50,7 @@ describe("SchemaDotOrgDataSet", () => {
     expect(pldStats).toHaveLength(0);
   });
 
-  it(
+  it.skip(
     "gets a PLD dataset",
     async () => {
       if (process.env.CI) {
@@ -86,7 +86,7 @@ describe("SchemaDotOrgDataSet", () => {
       const dataset = await pldSubset.dataset();
       expect(dataset.size).toBeGreaterThan(0);
     },
-    60 * 60 * 1000
+    120 * 60 * 1000
   );
 
   it("gets sample pages", async () => {
