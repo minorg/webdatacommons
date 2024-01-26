@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import WebDataCommons from "./WebDataCommons.js";
 import {
   binary,
