@@ -737,7 +737,9 @@ namespace SchemaDotOrgDataSet {
                   if (fileStream) {
                     fileStream.end(() => {
                       const uncompressedFilePath = this.cache.filePath(
-                        this.datasetCacheKey(payLevelDomainName)
+                        this.datasetCacheKey(payLevelDomainName, {
+                          compressed: false,
+                        })
                       );
                       brotliCompressTextFile(uncompressedFilePath).then(
                         () =>
@@ -776,7 +778,12 @@ namespace SchemaDotOrgDataSet {
           logger.debug("closing %d files", fileStreams.length);
           await Promise.all(
             fileStreams.map(
-              (fileStream) => new Promise((resolve) => fileStream.end(resolve))
+              (fileStream) =>
+                new Promise((resolve) => {
+                  if (fileStream) {
+                    fileStream.end(resolve);
+                  }
+                })
             )
           );
           logger.debug("closed %d files", fileStreams.length);
