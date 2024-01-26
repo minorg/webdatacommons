@@ -7,6 +7,8 @@ import process from "node:process";
 import logger from "./logger.js";
 import cliProgress from "cli-progress";
 import ImmutableCache from "./ImmutableCache.js";
+// @ts-expect-error No types
+import devNull from "dev-null";
 
 const isTextResponseBody = ({
   contentTypeHeader,
@@ -34,27 +36,42 @@ const isTextResponseBody = ({
   }
 };
 
+export interface HttpClientOptions extends ExtendOptions {
+  readonly?: boolean;
+  showProgress?: boolean;
+}
+
 /**
  * Facade for a simple HTTP client used for fetching data from WebDataCommons and other sites.
  *
  * The client:
  * - only supports GET
  * - caches response bodies indefinitely on the file system, ignoring RFC 9213 cache control
- * - throws an exception if a network request would be made in NODE_ENV=production (i.e., from GitHub Pages, where new files wouldn't be added to the committed cache)
  */
 export default class HttpClient {
   private readonly cache: ImmutableCache;
   private readonly got: Got;
+  private readonly readonly: boolean;
+  private readonly showProgress: boolean;
 
   constructor({
     cache,
-    gotOptions,
+    options,
   }: {
     cache: ImmutableCache;
-    gotOptions?: ExtendOptions;
+    options?: HttpClientOptions;
   }) {
     this.cache = cache;
-    this.got = gotOptions ? got.extend(gotOptions) : got;
+    if (options) {
+      const {readonly, showProgress, ...gotOptions} = options;
+      this.got = got.extend(gotOptions);
+      this.readonly = !!readonly;
+      this.showProgress = !!showProgress;
+    } else {
+      this.got = got;
+      this.readonly = false;
+      this.showProgress = false;
+    }
   }
 
   private cacheKey(url: string, pathSuffix?: string): ImmutableCache.Key {
@@ -81,14 +98,10 @@ export default class HttpClient {
     }
     logger.info("HTTP client cache miss: %s", url);
 
-    switch (process.env.NODE_ENV) {
-      case "development":
-      case "test":
-        break;
-      default:
-        throw new Error(
-          `refusing to make network request for ${url} in environment ${process.env.NODE_ENV}`
-        );
+    if (this.readonly) {
+      throw new Error(
+        `HTTP client is read-only: refusing to make network request for ${url} in environment ${process.env.NODE_ENV}`
+      );
     }
 
     await this.getUncached(url);
@@ -119,12 +132,15 @@ export default class HttpClient {
   private async getUncached(url: string): Promise<void> {
     logger.debug("requesting %s", url);
     const requestStream = this.got.stream(url);
-    const progressBar = new cliProgress.SingleBar({});
+    const progressBar = new cliProgress.SingleBar({
+      format: "{url} | {bar} | {value}/{total}",
+      stream: this.showProgress ? process.stderr : devNull,
+    });
     progressBar.start(100, 0);
     return new Promise((resolve, reject) => {
       requestStream.on("downloadProgress", ({percent}) => {
         const percentage = Math.round(percent * 100);
-        progressBar.update(percentage);
+        progressBar.update(percentage, {url});
       });
 
       requestStream.on("response", async (response: Response) => {

@@ -21,6 +21,8 @@ import split2 from "split2";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import brotliCompressTextFile from "./brotliCompressTextFile.js";
+// @ts-expect-error No types
+import devNull from "dev-null";
 
 // Utility functions
 const getChildTextNodes = (htmlElement: HTMLElement) =>
@@ -69,19 +71,23 @@ const parseRelatedClassTextNode = (
 class SchemaDotOrgDataSet {
   private readonly cache: ImmutableCache;
   private readonly httpClient: HttpClient;
+  private readonly showProgress: boolean;
   readonly version: string;
 
   constructor({
     cache,
     httpClient,
+    showProgress,
     version,
   }: {
     cache: ImmutableCache;
     httpClient: HttpClient;
+    showProgress: boolean;
     version: string;
   }) {
     this.cache = cache;
     this.httpClient = httpClient;
+    this.showProgress = showProgress;
     this.version = version ?? "2022-12";
   }
 
@@ -147,9 +153,11 @@ class SchemaDotOrgDataSet {
           },
           httpClient: this.httpClient,
           lookupFileUrl,
+          parent: this,
           pldStatsFileUrl,
           relatedClasses,
           sampleDataFileUrl: downloadHrefs[1],
+          showProgress: this.showProgress,
           size: sizeCell.text,
         });
       });
@@ -176,10 +184,12 @@ namespace SchemaDotOrgDataSet {
     private readonly downloadDirectoryUrl: string;
     readonly generalStats: SchemaDotOrgDataSet.ClassSubset.GeneralStats;
     private readonly httpClient: HttpClient;
-    private readonly pldStatsFileUrl: string;
     private readonly lookupFileUrl: string;
+    readonly parent: SchemaDotOrgDataSet;
+    private readonly pldStatsFileUrl: string;
     readonly relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
     private readonly sampleDataFileUrl: string;
+    private readonly showProgress: boolean;
     readonly size: string;
 
     constructor({
@@ -189,9 +199,11 @@ namespace SchemaDotOrgDataSet {
       generalStats,
       httpClient,
       lookupFileUrl,
+      parent,
       pldStatsFileUrl,
       relatedClasses,
       sampleDataFileUrl,
+      showProgress,
       size,
     }: {
       cache: ImmutableCache;
@@ -204,9 +216,11 @@ namespace SchemaDotOrgDataSet {
       };
       httpClient: HttpClient;
       lookupFileUrl: string;
+      parent: SchemaDotOrgDataSet;
       pldStatsFileUrl: string;
       relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
       sampleDataFileUrl: string;
+      showProgress: boolean;
       size: string;
     }) {
       this.cache = cache;
@@ -215,9 +229,11 @@ namespace SchemaDotOrgDataSet {
       this.generalStats = generalStats;
       this.httpClient = httpClient;
       this.lookupFileUrl = lookupFileUrl;
+      this.parent = parent;
       this.pldStatsFileUrl = pldStatsFileUrl;
       this.relatedClasses = relatedClasses;
       this.sampleDataFileUrl = sampleDataFileUrl;
+      this.showProgress = showProgress;
       this.size = size;
     }
 
@@ -276,10 +292,12 @@ namespace SchemaDotOrgDataSet {
           map[domain] =
             new SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset({
               cache: this.cache,
+              dataFileName,
               dataFileUrl: this.downloadDirectoryUrl + "/" + dataFileName,
               domain,
               httpClient: this.httpClient,
               parent: this,
+              showProgress: this.showProgress,
               stats: {
                 entitiesOfClass: parseInt(row["#Entities of class"]),
                 propertiesAndDensity: parsePldStatsPropertiesAndDensity(
@@ -370,32 +388,40 @@ namespace SchemaDotOrgDataSet {
 
     export class PayLevelDomainSubset {
       private readonly cache: ImmutableCache;
+      private readonly dataFileName: string;
       private readonly dataFileUrl: string;
       private readonly httpClient: HttpClient;
       private readonly parent: SchemaDotOrgDataSet.ClassSubset;
       readonly domain: string;
+      private readonly showProgress: boolean;
       readonly stats: PayLevelDomainSubset.Stats;
 
       constructor({
         cache,
+        dataFileName,
         dataFileUrl,
         domain,
         httpClient,
         parent,
+        showProgress,
         stats,
       }: {
         cache: ImmutableCache;
+        dataFileName: string;
         dataFileUrl: string;
         domain: string;
         httpClient: HttpClient;
         parent: SchemaDotOrgDataSet.ClassSubset;
+        showProgress: boolean;
         stats: PayLevelDomainSubset.Stats;
       }) {
         this.cache = cache;
+        this.dataFileName = dataFileName;
         this.dataFileUrl = dataFileUrl;
         this.domain = domain;
         this.httpClient = httpClient;
         this.parent = parent;
+        this.showProgress = showProgress;
         this.stats = stats;
       }
 
@@ -417,46 +443,84 @@ namespace SchemaDotOrgDataSet {
         }
       }
 
+      /**
+       * Get the cache key associated with a pay-level domain.
+       */
       private datasetCacheKey(
-        domain: string,
-        fileNameSuffix?: string
+        payLevelDomainName: string,
+        {compressed}: {compressed: boolean}
       ): ImmutableCache.Key {
         return [
           "pld-datasets",
+          this.parent.parent.version,
           this.parent.className,
-          domain + ".nq" + (fileNameSuffix ?? ""),
+          payLevelDomainName + ".nq" + (compressed ? ".br" : ""),
         ];
       }
 
+      /**
+       * Read the quads associated with this pay-level domain from the data file.
+       *
+       * Uses the cached output of .getAndSplitDataFile.
+       */
       private async datasetCached(): Promise<DatasetCore | null> {
         // The dataset is only considered cached if the compressed version exists,
-        // because that indicates the source data (part_X.gz) was processed completely.
-        const cacheKey = this.datasetCacheKey(this.domain, ".br");
+        // because that indicates the source data  was processed completely.
+        const cacheKey = this.datasetCacheKey(this.domain, {compressed: true});
         const cacheFileStream = await this.cache.get(cacheKey);
         if (cacheFileStream === null) {
           return null;
         }
+        const cacheFilePath = this.cache.filePath(cacheKey);
+        logger.debug("decompressing and parsing %s", cacheFilePath);
+        const progressBar = new cliProgress.SingleBar({
+          format: `decompressing and parsing ${cacheFilePath}: {value} quads`,
+          stream: this.showProgress ? process.stderr : devNull,
+        });
         const quadStream = cacheFileStream
           .pipe(zlib.createBrotliDecompress())
           .pipe(new StreamParser({format: "N-Quads"}));
+        progressBar.start(Number.MAX_SAFE_INTEGER, 0);
         return new Promise((resolve, reject) => {
           const store = new Store();
           quadStream.on("data", (quad) => {
             store.add(quad);
+            progressBar.increment();
           });
           quadStream.on("error", (error) => {
-            logger.error("error parsing %s: %s", cacheKey, error);
+            logger.error("error parsing %s: %s", cacheFilePath, error);
           });
           quadStream.on("end", (error: any) => {
             if (error) {
               reject(error);
             } else {
+              logger.debug("decompressed and parsed %s", cacheFilePath);
               resolve(store);
             }
           });
         });
       }
 
+      /**
+       * Get and split the data file (e.g., "AdministrativeArea/part_0.gz") that contains this pay-level domain (PLD)'s data for the
+       * associated schema.org class-specific subset.
+       *
+       * This method is not thread-safe.
+       *
+       * The process works as follows:
+       * 1. Download the gzipped N-Quads file to the cache if necessary.
+       * 2. Simultaneously uncompress and iterate over each line in the file. (See note below re: why this is line-by-line.)
+       * 3. For each line, parse the N-Quad.
+       * 4. Batch contiguous N-Quads belonging to a single PLD in memory.
+       * 5. When a new pay-level domain name is seen, flush the current batch to an uncompressed .nq file, which serves as a temporary
+       *  store for quads related to that PLD. There is one temporary .nq file per PLD.
+       * 6. When all lines from the source N-Quads file have been seen, compress the temporary, uncompressed per-PLD files (.nq -> .nq.br).
+       *   A compressed file is considered complete. Delete the temporary uncompressed (.nq) file.
+       *
+       * The result is a (cache) directory full of <PLD>.nq.br files for all PLDs represented in the data file.
+       * The .datasetCached method reads the <PLD>.nq.br file corresponding to this PLD instance, but other PLD instances that refer to the same
+       * data file will reuse their respective <PLD>.nq.br files from the cache without having to run the split themselves.
+       */
       private async getAndSplitDataFile(): Promise<void> {
         // Download the data file and split it into one cached file per PLD.
         const payLevelDomainNames = new Set(
@@ -476,13 +540,12 @@ namespace SchemaDotOrgDataSet {
           return null;
         };
 
-        const progressBars = new cliProgress.MultiBar({});
-        const pldsProgressBar = progressBars.create(
+        const progressBars = new cliProgress.MultiBar({
+          format: `Split ${this.parent.className} ${this.dataFileName} {metric} [{bar}] {percentage}% | {value}/{total}`,
+          stream: this.showProgress ? process.stderr : devNull,
+        });
+        const payLevelDomainsProgressBar = progressBars.create(
           payLevelDomainNames.size,
-          0
-        );
-        const quadsProgressBar = progressBars.create(
-          this.stats.quadsOfSubset,
           0
         );
 
@@ -500,8 +563,10 @@ namespace SchemaDotOrgDataSet {
         let batch: Batch | null = null;
         // One file per pay level domain name
         // Keep the file handles open in case the quads for a PLD are not contiguous
-        const fileStreamsByPayLevelDomainName: Record<string, fs.WriteStream> =
-          {};
+        const fileStreamsByPayLevelDomainName: Record<
+          string,
+          fs.WriteStream | null
+        > = {};
         const parser = new Parser({format: "N-Quads"});
         const writer = new Writer({format: "N-Quads"});
 
@@ -510,28 +575,60 @@ namespace SchemaDotOrgDataSet {
 
           let fileStream =
             fileStreamsByPayLevelDomainName[batch.payLevelDomainName];
-          if (fileStream) {
+          if (fileStream === null) {
+            // We set fileStream to null in the else branch to indicate that a
+            // complete, compressed file for this pay-level domain already exists.
             logger.trace(
-              "reusing file handle for pay-level domain: %s",
+              "skipping write to already-complete pay-level domain: %s",
+              batch.payLevelDomainName
+            );
+            return;
+          } else if (fileStream != null) {
+            // i.e., it's not undefined
+            logger.trace(
+              "reusing file stream for pay-level domain: %s",
               batch.payLevelDomainName
             );
           } else {
-            fileStream = await this.cache.createWriteStream(
-              this.datasetCacheKey(batch.payLevelDomainName)
-            );
-            fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
-              fileStream;
-
-            pldsProgressBar.increment();
+            payLevelDomainsProgressBar.increment({
+              metric: "pay-level domains seen",
+            });
             logger.trace(
               "data file %s: encountered new pay-level domain: %s",
               this.dataFileUrl,
               batch.payLevelDomainName
             );
+
+            // A complete, compressed file already exists for this pay-level domain
+            // Skip further writes.
+            if (
+              await this.cache.has(
+                this.datasetCacheKey(batch.payLevelDomainName, {
+                  compressed: true,
+                })
+              )
+            ) {
+              fileStreamsByPayLevelDomainName[batch.payLevelDomainName] = null;
+              logger.trace(
+                "pay-level domain %s is already complete, will skip further writes",
+                batch.payLevelDomainName
+              );
+              return;
+            }
+
+            // Create a new uncompressed file for this pay-level domain.
+            // This will zero out any existing data in the file.
+            fileStream = await this.cache.createWriteStream(
+              this.datasetCacheKey(batch.payLevelDomainName, {
+                compressed: false,
+              })
+            );
+            fileStreamsByPayLevelDomainName[batch.payLevelDomainName] =
+              fileStream;
           }
 
           await new Promise<void>((resolve) => {
-            fileStream.write(
+            fileStream!.write(
               batch.quads
                 .map((quad) =>
                   writer.quadToString(
@@ -550,11 +647,6 @@ namespace SchemaDotOrgDataSet {
 
         try {
           for await (const line of lineStream) {
-            // if (Object.keys(fileStreamsByPayLevelDomainName).length >= 2) {
-            //   break;
-            // }
-            quadsProgressBar.increment();
-
             let quads: Quad[];
             try {
               quads = parser.parse(line);
@@ -645,12 +737,16 @@ namespace SchemaDotOrgDataSet {
                   if (fileStream) {
                     fileStream.end(() => {
                       const uncompressedFilePath = this.cache.filePath(
-                        this.datasetCacheKey(payLevelDomainName)
+                        this.datasetCacheKey(payLevelDomainName, {
+                          compressed: false,
+                        })
                       );
                       brotliCompressTextFile(uncompressedFilePath).then(
                         () =>
                           fsPromises.unlink(uncompressedFilePath).then(() => {
-                            closeProgressBar.increment();
+                            closeProgressBar.increment({
+                              metric: "files closed and compressed",
+                            });
                             resolve();
                           }, reject),
                         reject
@@ -682,7 +778,12 @@ namespace SchemaDotOrgDataSet {
           logger.debug("closing %d files", fileStreams.length);
           await Promise.all(
             fileStreams.map(
-              (fileStream) => new Promise((resolve) => fileStream.end(resolve))
+              (fileStream) =>
+                new Promise((resolve) => {
+                  if (fileStream) {
+                    fileStream.end(resolve);
+                  }
+                })
             )
           );
           logger.debug("closed %d files", fileStreams.length);

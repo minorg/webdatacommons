@@ -1,6 +1,9 @@
 {
   "author": "Minor Gordon",
   "name": "webdatacommons",
+  "bin": {
+    "webdatacommons": "./dist/cli.js"
+  },
   "description": "TypeScript library and CLI for working with Web Data Commons datasets",
   "dependencies": {
     "@rdfjs/types": "^1.1.0",
@@ -11,8 +14,11 @@
     "@types/papaparse": "^5.3.14",
     "@types/split2": "^4.2.3",
     "cli-progress": "^3.12.0",
+    "cmd-ts": "^0.13.0",
     "concat-stream": "^2.0.0",
     "content-type": "^1.0.5",
+    "dev-null": "^0.1.1",
+    "global-cache-dir": "^6.0.0",
     "got": "^14.0.0",
     "n3": "^1.17.2",
     "node-html-parser": "^6.1.11",
@@ -58,5 +64,5 @@
   },
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "1.0.2"
+  "version": "2.0.0"
 }

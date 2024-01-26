@@ -4,24 +4,39 @@ import {Readable} from "node:stream";
 import {pipeline as streamPipeline} from "node:stream/promises";
 import path from "node:path";
 import logger from "./logger.js";
+import {invariant} from "ts-invariant";
+
+const existsAsync = async (filePath: string) =>
+  !!(await fsPromises.stat(filePath).catch(() => false));
 
 /**
  * Immutable cache backed by the file system.
  */
 class ImmutableCache {
+  private readonly readonly: boolean;
   private readonly rootDirectoryPath: string;
 
-  constructor({rootDirectoryPath}: {rootDirectoryPath: string}) {
+  constructor({
+    readonly,
+    rootDirectoryPath,
+  }: {
+    readonly?: boolean;
+    rootDirectoryPath: string;
+  }) {
+    this.readonly = !!readonly;
     this.rootDirectoryPath = rootDirectoryPath;
   }
 
-  private dirPath(key: ImmutableCache.Key): string {
-    return path.dirname(this.filePath(key));
-  }
-
   async createWriteStream(key: ImmutableCache.Key): Promise<fs.WriteStream> {
-    await this.mkdirs(key);
     const filePath = this.filePath(key);
+
+    if (this.readonly) {
+      throw new Error(
+        `Cache is read-only: refusing to create write stream for ${filePath} in environment ${process.env.NODE_ENV}`
+      );
+    }
+
+    await this.mkdirs(key);
     return fs.createWriteStream(filePath, {flags: "w+"});
   }
 
@@ -35,8 +50,7 @@ class ImmutableCache {
     // Checking exists then creating a read stream is not ideal,
     // but fs.createReadStream doesn't report an error until the stream is read by the caller.
     // It should be OK, since the cache is supposed to be immutable.
-    const fileExists = !!(await fsPromises.stat(filePath).catch(() => false));
-    if (!fileExists) {
+    if (!(await existsAsync(filePath))) {
       logger.debug("cache miss: %s", key.join("/"));
       return null;
     }
@@ -46,8 +60,13 @@ class ImmutableCache {
     return fs.createReadStream(filePath);
   }
 
+  async has(key: ImmutableCache.Key): Promise<boolean> {
+    return await existsAsync(this.filePath(key));
+  }
+
   private async mkdirs(key: ImmutableCache.Key): Promise<void> {
-    const dirPath = this.dirPath(key);
+    invariant(!this.readonly);
+    const dirPath = path.dirname(this.filePath(key));
     // logger.debug("recursively creating directory: %s", dirPath);
     await fsPromises.mkdir(dirPath, {recursive: true});
     // logger.debug("recursively created directory: %s", dirPath);
@@ -57,8 +76,16 @@ class ImmutableCache {
     key: ImmutableCache.Key,
     value: ImmutableCache.Value
   ): Promise<void> {
+    const filePath = this.filePath(key);
+
+    if (this.readonly) {
+      throw new Error(
+        `Cache is read-only: refusing to write to ${filePath} in environment ${process.env.NODE_ENV}`
+      );
+    }
+
     await this.mkdirs(key);
-    const fileStream = fs.createWriteStream(this.filePath(key));
+    const fileStream = fs.createWriteStream(filePath);
     try {
       await streamPipeline([value, fileStream]);
     } finally {
