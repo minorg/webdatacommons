@@ -27,12 +27,21 @@ describe("ImmutableCache", () => {
     sut = new ImmutableCache({rootDirectoryPath: cacheDirPath});
   });
 
-  it("returns null from a missing key", async () => {
+  it("get returns null from a missing key", async () => {
     expect(await sut.get(key)).toBeNull();
+  });
+
+  it("has returns false from a missing key", async () => {
+    expect(await sut.has(key)).toStrictEqual(false);
   });
 
   it("sets a value", async () => {
     await sut.set(key, await stringToStream("test"));
+  });
+
+  it("sets a value and has returns true", async () => {
+    await sut.set(key, await stringToStream("test"));
+    expect(await sut.has(key)).toStrictEqual(true);
   });
 
   it("sets a value and gets it back", async () => {

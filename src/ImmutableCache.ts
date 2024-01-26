@@ -4,7 +4,10 @@ import {Readable} from "node:stream";
 import {pipeline as streamPipeline} from "node:stream/promises";
 import path from "node:path";
 import logger from "./logger.js";
-import invariant from "ts-invariant";
+import {invariant} from "ts-invariant";
+
+const existsAsync = async (filePath: string) =>
+  !!(await fsPromises.stat(filePath).catch(() => false));
 
 /**
  * Immutable cache backed by the file system.
@@ -47,8 +50,7 @@ class ImmutableCache {
     // Checking exists then creating a read stream is not ideal,
     // but fs.createReadStream doesn't report an error until the stream is read by the caller.
     // It should be OK, since the cache is supposed to be immutable.
-    const fileExists = !!(await fsPromises.stat(filePath).catch(() => false));
-    if (!fileExists) {
+    if (!(await existsAsync(filePath))) {
       logger.debug("cache miss: %s", key.join("/"));
       return null;
     }
@@ -56,6 +58,10 @@ class ImmutableCache {
     logger.debug("cache hit: %s", key.join("/"));
 
     return fs.createReadStream(filePath);
+  }
+
+  async has(key: ImmutableCache.Key): Promise<boolean> {
+    return await existsAsync(this.filePath(key));
   }
 
   private async mkdirs(key: ImmutableCache.Key): Promise<void> {
@@ -79,7 +85,7 @@ class ImmutableCache {
     }
 
     await this.mkdirs(key);
-    const fileStream = fs.createWriteStream(filepath);
+    const fileStream = fs.createWriteStream(filePath);
     try {
       await streamPipeline([value, fileStream]);
     } finally {
