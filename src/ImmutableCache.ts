@@ -37,7 +37,7 @@ class ImmutableCache {
     return fs.createWriteStream(filePath, {flags: "w+"});
   }
 
-  private filePath(key: ImmutableCache.Key): string {
+  filePath(key: ImmutableCache.Key): string {
     return path.join(this.rootDirectoryPath, ...key);
   }
 

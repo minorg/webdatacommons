@@ -153,6 +153,7 @@ class SchemaDotOrgDataSet {
           },
           httpClient: this.httpClient,
           lookupFileUrl,
+          parent: this,
           pldStatsFileUrl,
           relatedClasses,
           sampleDataFileUrl: downloadHrefs[1],
@@ -183,8 +184,9 @@ namespace SchemaDotOrgDataSet {
     private readonly downloadDirectoryUrl: string;
     readonly generalStats: SchemaDotOrgDataSet.ClassSubset.GeneralStats;
     private readonly httpClient: HttpClient;
-    private readonly pldStatsFileUrl: string;
     private readonly lookupFileUrl: string;
+    readonly parent: SchemaDotOrgDataSet;
+    private readonly pldStatsFileUrl: string;
     readonly relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
     private readonly sampleDataFileUrl: string;
     private readonly showProgress: boolean;
@@ -197,6 +199,7 @@ namespace SchemaDotOrgDataSet {
       generalStats,
       httpClient,
       lookupFileUrl,
+      parent,
       pldStatsFileUrl,
       relatedClasses,
       sampleDataFileUrl,
@@ -213,6 +216,7 @@ namespace SchemaDotOrgDataSet {
       };
       httpClient: HttpClient;
       lookupFileUrl: string;
+      parent: SchemaDotOrgDataSet;
       pldStatsFileUrl: string;
       relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
       sampleDataFileUrl: string;
@@ -225,6 +229,7 @@ namespace SchemaDotOrgDataSet {
       this.generalStats = generalStats;
       this.httpClient = httpClient;
       this.lookupFileUrl = lookupFileUrl;
+      this.parent = parent;
       this.pldStatsFileUrl = pldStatsFileUrl;
       this.relatedClasses = relatedClasses;
       this.sampleDataFileUrl = sampleDataFileUrl;
@@ -444,6 +449,7 @@ namespace SchemaDotOrgDataSet {
       ): ImmutableCache.Key {
         return [
           "pld-datasets",
+          this.parent.parent.version,
           this.parent.className,
           domain + ".nq" + (fileNameSuffix ?? ""),
         ];
