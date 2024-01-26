@@ -465,27 +465,36 @@ namespace SchemaDotOrgDataSet {
        */
       private async datasetCached(): Promise<DatasetCore | null> {
         // The dataset is only considered cached if the compressed version exists,
-        // because that indicates the source data (part_X.gz) was processed completely.
+        // because that indicates the source data  was processed completely.
         const cacheKey = this.datasetCacheKey(this.domain, {compressed: true});
         const cacheFileStream = await this.cache.get(cacheKey);
         if (cacheFileStream === null) {
           return null;
         }
+        const cacheFilePath = this.cache.filePath(cacheKey);
+        logger.debug("decompressing and parsing %s", cacheFilePath);
+        const progressBar = new cliProgress.SingleBar({
+          format: `decompressing and parsing ${cacheFilePath}: {value} quads`,
+          stream: this.showProgress ? process.stderr : devNull,
+        });
         const quadStream = cacheFileStream
           .pipe(zlib.createBrotliDecompress())
           .pipe(new StreamParser({format: "N-Quads"}));
+        progressBar.start(Number.MAX_SAFE_INTEGER, 0);
         return new Promise((resolve, reject) => {
           const store = new Store();
           quadStream.on("data", (quad) => {
             store.add(quad);
+            progressBar.increment();
           });
           quadStream.on("error", (error) => {
-            logger.error("error parsing %s: %s", cacheKey, error);
+            logger.error("error parsing %s: %s", cacheFilePath, error);
           });
           quadStream.on("end", (error: any) => {
             if (error) {
               reject(error);
             } else {
+              logger.debug("decompressed and parsed %s", cacheFilePath);
               resolve(store);
             }
           });
