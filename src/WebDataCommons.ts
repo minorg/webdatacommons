@@ -9,18 +9,24 @@ export default class WebDataCommons {
 
   constructor({
     cacheDirectoryPath,
+    readonly,
     showProgress,
   }: {
     cacheDirectoryPath: string;
+    readonly?: boolean;
     showProgress?: boolean;
   }) {
-    this.cache = new ImmutableCache({rootDirectoryPath: cacheDirectoryPath});
+    this.cache = new ImmutableCache({
+      readonly,
+      rootDirectoryPath: cacheDirectoryPath,
+    });
     this.httpClient = new HttpClient({
       cache: this.cache,
       options: {
         retry: {
           limit: 10,
         },
+        readonly,
         showProgress,
       },
     });

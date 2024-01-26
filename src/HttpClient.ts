@@ -36,17 +36,22 @@ const isTextResponseBody = ({
   }
 };
 
+export interface HttpClientOptions extends ExtendOptions {
+  readonly?: boolean;
+  showProgress?: boolean;
+}
+
 /**
  * Facade for a simple HTTP client used for fetching data from WebDataCommons and other sites.
  *
  * The client:
  * - only supports GET
  * - caches response bodies indefinitely on the file system, ignoring RFC 9213 cache control
- * - throws an exception if a network request would be made in NODE_ENV=production (i.e., from GitHub Pages, where new files wouldn't be added to the committed cache)
  */
 export default class HttpClient {
   private readonly cache: ImmutableCache;
   private readonly got: Got;
+  private readonly readonly: boolean;
   private readonly showProgress: boolean;
 
   constructor({
@@ -54,15 +59,17 @@ export default class HttpClient {
     options,
   }: {
     cache: ImmutableCache;
-    options?: ExtendOptions & {showProgress?: boolean};
+    options?: HttpClientOptions;
   }) {
     this.cache = cache;
     if (options) {
-      const {showProgress, ...gotOptions} = options;
+      const {readonly, showProgress, ...gotOptions} = options;
       this.got = got.extend(gotOptions);
+      this.readonly = !!readonly;
       this.showProgress = !!showProgress;
     } else {
       this.got = got;
+      this.readonly = false;
       this.showProgress = false;
     }
   }
@@ -91,16 +98,10 @@ export default class HttpClient {
     }
     logger.info("HTTP client cache miss: %s", url);
 
-    if (process.env.NODE_ENV) {
-      switch (process.env.NODE_ENV) {
-        case "development":
-        case "test":
-          break;
-        default:
-          throw new Error(
-            `refusing to make network request for ${url} in environment ${process.env.NODE_ENV}`
-          );
-      }
+    if (this.readonly) {
+      throw new Error(
+        `HTTP client is read-only: refusing to make network request for ${url} in environment ${process.env.NODE_ENV}`
+      );
     }
 
     await this.getUncached(url);

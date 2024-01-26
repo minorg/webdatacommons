@@ -4,28 +4,40 @@ import {Readable} from "node:stream";
 import {pipeline as streamPipeline} from "node:stream/promises";
 import path from "node:path";
 import logger from "./logger.js";
+import invariant from "ts-invariant";
 
 /**
  * Immutable cache backed by the file system.
  */
 class ImmutableCache {
+  private readonly readonly: boolean;
   private readonly rootDirectoryPath: string;
 
-  constructor({rootDirectoryPath}: {rootDirectoryPath: string}) {
+  constructor({
+    readonly,
+    rootDirectoryPath,
+  }: {
+    readonly?: boolean;
+    rootDirectoryPath: string;
+  }) {
+    this.readonly = !!readonly;
     this.rootDirectoryPath = rootDirectoryPath;
   }
 
-  private dirPath(key: ImmutableCache.Key): string {
-    return path.dirname(this.filePath(key));
-  }
-
   async createWriteStream(key: ImmutableCache.Key): Promise<fs.WriteStream> {
-    await this.mkdirs(key);
     const filePath = this.filePath(key);
+
+    if (this.readonly) {
+      throw new Error(
+        `Cache is read-only: refusing to create write stream for ${filePath} in environment ${process.env.NODE_ENV}`
+      );
+    }
+
+    await this.mkdirs(key);
     return fs.createWriteStream(filePath, {flags: "w+"});
   }
 
-  filePath(key: ImmutableCache.Key): string {
+  private filePath(key: ImmutableCache.Key): string {
     return path.join(this.rootDirectoryPath, ...key);
   }
 
@@ -47,7 +59,8 @@ class ImmutableCache {
   }
 
   private async mkdirs(key: ImmutableCache.Key): Promise<void> {
-    const dirPath = this.dirPath(key);
+    invariant(!this.readonly);
+    const dirPath = path.dirname(this.filePath(key));
     // logger.debug("recursively creating directory: %s", dirPath);
     await fsPromises.mkdir(dirPath, {recursive: true});
     // logger.debug("recursively created directory: %s", dirPath);
@@ -57,8 +70,16 @@ class ImmutableCache {
     key: ImmutableCache.Key,
     value: ImmutableCache.Value
   ): Promise<void> {
+    const filePath = this.filePath(key);
+
+    if (this.readonly) {
+      throw new Error(
+        `Cache is read-only: refusing to write to ${filePath} in environment ${process.env.NODE_ENV}`
+      );
+    }
+
     await this.mkdirs(key);
-    const fileStream = fs.createWriteStream(this.filePath(key));
+    const fileStream = fs.createWriteStream(filepath);
     try {
       await streamPipeline([value, fileStream]);
     } finally {
