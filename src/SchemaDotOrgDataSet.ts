@@ -425,22 +425,34 @@ namespace SchemaDotOrgDataSet {
         this.stats = stats;
       }
 
-      @Memoize()
-      async dataset(): Promise<DatasetCore> {
-        const dataset = await this.datasetCached();
-        if (dataset !== null) {
-          return dataset;
+      async *dataset() {
+        const cacheKey = this.datasetCacheKey(this.domain, {compressed: true});
+
+        let cacheFileStream = await this.cache.get(cacheKey);
+        if (cacheFileStream == null) {
+          await this.getAndSplitDataFile();
+          cacheFileStream = await this.cache.get(cacheKey);
+          invariant(
+            cacheFileStream !== null,
+            `${this.domain} not present in data file`
+          );
         }
 
-        await this.getAndSplitDataFile();
-
-        {
-          const dataset = await this.datasetCached();
-          if (dataset === null) {
-            throw new RangeError(`unable to get ${this.domain} dataset`);
-          }
-          return dataset;
+        const cacheFilePath = this.cache.filePath(cacheKey);
+        logger.debug("decompressing and parsing %s", cacheFilePath);
+        const progressBar = new cliProgress.SingleBar({
+          format: `decompressing and parsing ${cacheFilePath}: {value} quads`,
+          stream: this.showProgress ? process.stderr : devNull,
+        });
+        const quadStream = cacheFileStream
+          .pipe(zlib.createBrotliDecompress())
+          .pipe(new StreamParser({format: "N-Quads"}));
+        progressBar.start(Number.MAX_SAFE_INTEGER, 0);
+        for await (const quad of quadStream) {
+          progressBar.increment();
+          yield quad;
         }
+        progressBar.stop();
       }
 
       /**
@@ -456,49 +468,6 @@ namespace SchemaDotOrgDataSet {
           this.parent.className,
           payLevelDomainName + ".nq" + (compressed ? ".br" : ""),
         ];
-      }
-
-      /**
-       * Read the quads associated with this pay-level domain from the data file.
-       *
-       * Uses the cached output of .getAndSplitDataFile.
-       */
-      private async datasetCached(): Promise<DatasetCore | null> {
-        // The dataset is only considered cached if the compressed version exists,
-        // because that indicates the source data  was processed completely.
-        const cacheKey = this.datasetCacheKey(this.domain, {compressed: true});
-        const cacheFileStream = await this.cache.get(cacheKey);
-        if (cacheFileStream === null) {
-          return null;
-        }
-        const cacheFilePath = this.cache.filePath(cacheKey);
-        logger.debug("decompressing and parsing %s", cacheFilePath);
-        const progressBar = new cliProgress.SingleBar({
-          format: `decompressing and parsing ${cacheFilePath}: {value} quads`,
-          stream: this.showProgress ? process.stderr : devNull,
-        });
-        const quadStream = cacheFileStream
-          .pipe(zlib.createBrotliDecompress())
-          .pipe(new StreamParser({format: "N-Quads"}));
-        progressBar.start(Number.MAX_SAFE_INTEGER, 0);
-        return new Promise((resolve, reject) => {
-          const store = new Store();
-          quadStream.on("data", (quad) => {
-            store.add(quad);
-            progressBar.increment();
-          });
-          quadStream.on("error", (error) => {
-            logger.error("error parsing %s: %s", cacheFilePath, error);
-          });
-          quadStream.on("end", (error: any) => {
-            if (error) {
-              reject(error);
-            } else {
-              logger.debug("decompressed and parsed %s", cacheFilePath);
-              resolve(store);
-            }
-          });
-        });
       }
 
       /**
@@ -717,6 +686,8 @@ namespace SchemaDotOrgDataSet {
             await flushBatch(batch);
           }
 
+          payLevelDomainsProgressBar.stop();
+
           // Finished successfully.
           // Close all open files, compress them, and delete the uncompressed versions.
           // The file/dataset is only considered cached if the compressed version exists.
@@ -766,6 +737,7 @@ namespace SchemaDotOrgDataSet {
             "closed and compressed %d files",
             Object.keys(fileStreamsByPayLevelDomainName).length
           );
+          closeProgressBar.stop();
         } catch (error) {
           logger.error(
             "error processing data file %s: %s",

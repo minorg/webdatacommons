@@ -69,7 +69,7 @@ const extractSchemaDotOrgCommand = command({
     const dataset = await pldSubset.dataset();
 
     const writer = new Writer(process.stdout, {format: args.format});
-    for (const quad of dataset) {
+    for await (const quad of dataset) {
       writer.addQuad(quad);
     }
 
