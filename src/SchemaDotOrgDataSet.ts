@@ -13,7 +13,7 @@ import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
-import {Stream} from "node:stream";
+import {Readable, Stream} from "node:stream";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
@@ -32,6 +32,29 @@ const getChildTextNodes = (htmlElement: HTMLElement) =>
 
 const parseGeneralStatsTextNode = (textNode: TextNode) =>
   parseInt(textNode.text.trim().split(" ", 2)[1].replaceAll(",", ""));
+
+async function* parseNQuadsStream(stream: Readable) {
+  const lineStream = stream
+    // Have to parse the N-Quads line-by-line because the N3StreamParser gives up
+    // on the first error instead of simply going to the next line.
+    .pipe(split2());
+
+  const parser = new Parser({format: "N-Quads"});
+
+  for await (const line of lineStream) {
+    let quads: Quad[];
+    try {
+      quads = parser.parse(line);
+    } catch (error) {
+      logger.trace("error parsing N-Quads stream: %s", error);
+      continue;
+    }
+    invariant(quads.length === 1, "expected one quad per line");
+    const quad = quads[0];
+
+    yield quad;
+  }
+}
 
 const parsePldStatsPropertiesAndDensity = (
   json: string | undefined
@@ -131,6 +154,13 @@ class SchemaDotOrgDataSet {
         );
 
         const sizeCell = tableCells[2];
+        const sizeCellTextParts = sizeCell.text.split(" ");
+        const numberOfFiles = parseInt(
+          sizeCellTextParts[sizeCellTextParts.length - 1].substring(
+            1,
+            sizeCellTextParts[sizeCellTextParts.length - 1].length - 1
+          )
+        );
 
         const downloadHrefs = tableCells[3]
           .getElementsByTagName("a")
@@ -153,12 +183,12 @@ class SchemaDotOrgDataSet {
           },
           httpClient: this.httpClient,
           lookupFileUrl,
+          numberOfFiles,
           parent: this,
           pldStatsFileUrl,
           relatedClasses,
           sampleDataFileUrl: downloadHrefs[1],
           showProgress: this.showProgress,
-          size: sizeCell.text,
         });
       });
   }
@@ -185,12 +215,12 @@ namespace SchemaDotOrgDataSet {
     readonly generalStats: SchemaDotOrgDataSet.ClassSubset.GeneralStats;
     private readonly httpClient: HttpClient;
     private readonly lookupFileUrl: string;
+    readonly numberOfFiles: number;
     readonly parent: SchemaDotOrgDataSet;
     private readonly pldStatsFileUrl: string;
     readonly relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
     private readonly sampleDataFileUrl: string;
     private readonly showProgress: boolean;
-    readonly size: string;
 
     constructor({
       cache,
@@ -199,12 +229,12 @@ namespace SchemaDotOrgDataSet {
       generalStats,
       httpClient,
       lookupFileUrl,
+      numberOfFiles,
       parent,
       pldStatsFileUrl,
       relatedClasses,
       sampleDataFileUrl,
       showProgress,
-      size,
     }: {
       cache: ImmutableCache;
       className: string;
@@ -216,12 +246,12 @@ namespace SchemaDotOrgDataSet {
       };
       httpClient: HttpClient;
       lookupFileUrl: string;
+      numberOfFiles: number;
       parent: SchemaDotOrgDataSet;
       pldStatsFileUrl: string;
       relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
       sampleDataFileUrl: string;
       showProgress: boolean;
-      size: string;
     }) {
       this.cache = cache;
       this.className = className;
@@ -229,18 +259,32 @@ namespace SchemaDotOrgDataSet {
       this.generalStats = generalStats;
       this.httpClient = httpClient;
       this.lookupFileUrl = lookupFileUrl;
+      this.numberOfFiles = numberOfFiles;
       this.parent = parent;
       this.pldStatsFileUrl = pldStatsFileUrl;
       this.relatedClasses = relatedClasses;
       this.sampleDataFileUrl = sampleDataFileUrl;
       this.showProgress = showProgress;
-      this.size = size;
     }
 
     private async lookupCsvString(): Promise<string> {
       return (
         await streamToBuffer(await this.httpClient.get(this.lookupFileUrl))
       ).toString("utf8");
+    }
+
+    async *dataset() {
+      for (let fileI = 0; fileI < this.numberOfFiles; fileI++) {
+        for await (const quad of parseNQuadsStream(
+          (
+            await this.httpClient.get(
+              `${this.downloadDirectoryUrl}/part_${fileI}.gz`
+            )
+          ).pipe(zlib.createGunzip())
+        )) {
+          yield quad;
+        }
+      }
     }
 
     private async pldDataFileNames(): Promise<Record<string, string>> {
@@ -444,11 +488,11 @@ namespace SchemaDotOrgDataSet {
           format: `decompressing and parsing ${cacheFilePath}: {value} quads`,
           stream: this.showProgress ? process.stderr : devNull,
         });
-        const quadStream = cacheFileStream
-          .pipe(zlib.createBrotliDecompress())
-          .pipe(new StreamParser({format: "N-Quads"}));
+
         progressBar.start(Number.MAX_SAFE_INTEGER, 0);
-        for await (const quad of quadStream) {
+        for await (const quad of parseNQuadsStream(
+          cacheFileStream.pipe(zlib.createBrotliDecompress())
+        )) {
           progressBar.increment();
           yield quad;
         }
@@ -518,12 +562,6 @@ namespace SchemaDotOrgDataSet {
           0
         );
 
-        const lineStream = (await this.httpClient.get(this.dataFileUrl))
-          .pipe(zlib.createGunzip())
-          // Have to parse the N-Quads line-by-line because the N3StreamParser gives up
-          // on the first error instead of simply going to the next line.
-          .pipe(split2());
-
         // Batch quads for a PLD in memory to eliminate some disk writes
         type Batch = {
           payLevelDomainName: string;
@@ -536,7 +574,6 @@ namespace SchemaDotOrgDataSet {
           string,
           fs.WriteStream | null
         > = {};
-        const parser = new Parser({format: "N-Quads"});
         const writer = new Writer({format: "N-Quads"});
 
         const flushBatch = async (batch: Batch) => {
@@ -615,26 +652,11 @@ namespace SchemaDotOrgDataSet {
         };
 
         try {
-          for await (const line of lineStream) {
-            let quads: Quad[];
-            try {
-              quads = parser.parse(line);
-            } catch (error) {
-              logger.trace(
-                "error parsing data file %s: %s",
-                this.dataFileUrl,
-                error
-              );
-              continue;
-            }
-            invariant(quads.length === 1, "expected one quad per line");
-            const quad = quads[0];
-
-            if (quad.graph.termType !== "NamedNode") {
-              logger.warn("non-IRI quad graph: ", quad.graph.value);
-              continue;
-            }
-
+          for await (const quad of parseNQuadsStream(
+            (await this.httpClient.get(this.dataFileUrl)).pipe(
+              zlib.createGunzip()
+            )
+          )) {
             let payLevelDomainName: string;
             if (
               batch !== null &&

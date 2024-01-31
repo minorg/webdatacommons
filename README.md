@@ -1,6 +1,6 @@
 # webdatacommons
 
-TypeScript library and CLI for working with Web Data Commons datasets
+TypeScript library for Node 16+ and command line interface for working with Web Data Commons datasets
 
 ## Installation
 
