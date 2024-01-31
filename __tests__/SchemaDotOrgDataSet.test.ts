@@ -50,7 +50,7 @@ describe("SchemaDotOrgDataSet", () => {
     expect(pldStats).toHaveLength(0);
   });
 
-  it.skip(
+  it(
     "gets a PLD dataset",
     async () => {
       if (process.env.CI) {
@@ -83,8 +83,10 @@ describe("SchemaDotOrgDataSet", () => {
         await administrativeAreaClassSubset.payLevelDomainSubsetsByDomain()
       )["balsamohomes.com"];
       expect(pldSubset).not.toBeUndefined();
-      const dataset = await pldSubset.dataset();
-      expect(dataset.size).toBeGreaterThan(0);
+      for await (const _quad of pldSubset.dataset()) {
+        return;
+      }
+      fail();
     },
     120 * 60 * 1000
   );
