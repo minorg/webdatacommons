@@ -137,4 +137,16 @@ describe("SchemaDotOrgDataSet", () => {
       await administrativeAreaClassSubset.samplePagesByIri();
     expect(Object.keys(samplePagesByIri)).toHaveLength(1);
   });
+
+  it("handles 4xx on a class lookup file", async () => {
+    if (process.env.CI) {
+      return;
+    }
+
+    const paintingClassSubset = classSubsets.find(
+      (classSubset) => classSubset.className === "Painting"
+    );
+    expect(paintingClassSubset).not.toBeUndefined();
+    expect(await paintingClassSubset?.payLevelDomainSubsets()).toHaveLength(0);
+  });
 });

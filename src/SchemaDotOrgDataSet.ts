@@ -267,12 +267,6 @@ namespace SchemaDotOrgDataSet {
       this.showProgress = showProgress;
     }
 
-    private async lookupCsvString(): Promise<string> {
-      return (
-        await streamToBuffer(await this.httpClient.get(this.lookupFileUrl))
-      ).toString("utf8");
-    }
-
     async *dataset() {
       for (let fileI = 0; fileI < this.numberOfFiles; fileI++) {
         for await (const quad of parseNQuadsStream(
@@ -308,14 +302,26 @@ namespace SchemaDotOrgDataSet {
           return {};
       }
 
-      const pldDataFileNames = Papa.parse(await this.lookupCsvString(), {
-        header: true,
-      }).data.reduce((map: Record<string, string>, row: any) => {
-        if (row["pld"].length > 0) {
-          map[row["pld"]] = row["file_lookup"];
-        }
-        return map;
-      }, {});
+      let pldDataFileNames: Record<string, string>;
+      try {
+        pldDataFileNames = Papa.parse(
+          (
+            await streamToBuffer(await this.httpClient.get(this.lookupFileUrl))
+          ).toString("utf8"),
+          {
+            header: true,
+          }
+        ).data.reduce((map: Record<string, string>, row: any) => {
+          if (row["pld"].length > 0) {
+            map[row["pld"]] = row["file_lookup"];
+          }
+          return map;
+        }, {});
+      } catch (e) {
+        // The 2022-12 Painting lookup returns 403
+        logger.error("error getting and parsing %s: %s", this.lookupFileUrl, e);
+        return {};
+      }
 
       return (
         Papa.parse(
