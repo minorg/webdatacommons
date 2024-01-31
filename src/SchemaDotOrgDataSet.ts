@@ -13,7 +13,7 @@ import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
-import {Stream} from "node:stream";
+import {Readable, Stream} from "node:stream";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
@@ -32,6 +32,29 @@ const getChildTextNodes = (htmlElement: HTMLElement) =>
 
 const parseGeneralStatsTextNode = (textNode: TextNode) =>
   parseInt(textNode.text.trim().split(" ", 2)[1].replaceAll(",", ""));
+
+async function* parseNQuadsStream(stream: Readable) {
+  const lineStream = stream
+    // Have to parse the N-Quads line-by-line because the N3StreamParser gives up
+    // on the first error instead of simply going to the next line.
+    .pipe(split2());
+
+  const parser = new Parser({format: "N-Quads"});
+
+  for await (const line of lineStream) {
+    let quads: Quad[];
+    try {
+      quads = parser.parse(line);
+    } catch (error) {
+      logger.trace("error parsing N-Quads stream: %s", error);
+      continue;
+    }
+    invariant(quads.length === 1, "expected one quad per line");
+    const quad = quads[0];
+
+    yield quad;
+  }
+}
 
 const parsePldStatsPropertiesAndDensity = (
   json: string | undefined
@@ -250,6 +273,20 @@ namespace SchemaDotOrgDataSet {
       ).toString("utf8");
     }
 
+    async *dataset() {
+      for (let fileI = 0; fileI < this.numberOfFiles; fileI++) {
+        for await (const quad of parseNQuadsStream(
+          (
+            await this.httpClient.get(
+              `${this.downloadDirectoryUrl}/part_${fileI}.gz`
+            )
+          ).pipe(zlib.createGunzip())
+        )) {
+          yield quad;
+        }
+      }
+    }
+
     private async pldDataFileNames(): Promise<Record<string, string>> {
       return Papa.parse(await this.lookupCsvString(), {
         header: true,
@@ -451,11 +488,11 @@ namespace SchemaDotOrgDataSet {
           format: `decompressing and parsing ${cacheFilePath}: {value} quads`,
           stream: this.showProgress ? process.stderr : devNull,
         });
-        const quadStream = cacheFileStream
-          .pipe(zlib.createBrotliDecompress())
-          .pipe(new StreamParser({format: "N-Quads"}));
+
         progressBar.start(Number.MAX_SAFE_INTEGER, 0);
-        for await (const quad of quadStream) {
+        for await (const quad of parseNQuadsStream(
+          cacheFileStream.pipe(zlib.createBrotliDecompress())
+        )) {
           progressBar.increment();
           yield quad;
         }
@@ -525,12 +562,6 @@ namespace SchemaDotOrgDataSet {
           0
         );
 
-        const lineStream = (await this.httpClient.get(this.dataFileUrl))
-          .pipe(zlib.createGunzip())
-          // Have to parse the N-Quads line-by-line because the N3StreamParser gives up
-          // on the first error instead of simply going to the next line.
-          .pipe(split2());
-
         // Batch quads for a PLD in memory to eliminate some disk writes
         type Batch = {
           payLevelDomainName: string;
@@ -543,7 +574,6 @@ namespace SchemaDotOrgDataSet {
           string,
           fs.WriteStream | null
         > = {};
-        const parser = new Parser({format: "N-Quads"});
         const writer = new Writer({format: "N-Quads"});
 
         const flushBatch = async (batch: Batch) => {
@@ -622,26 +652,11 @@ namespace SchemaDotOrgDataSet {
         };
 
         try {
-          for await (const line of lineStream) {
-            let quads: Quad[];
-            try {
-              quads = parser.parse(line);
-            } catch (error) {
-              logger.trace(
-                "error parsing data file %s: %s",
-                this.dataFileUrl,
-                error
-              );
-              continue;
-            }
-            invariant(quads.length === 1, "expected one quad per line");
-            const quad = quads[0];
-
-            if (quad.graph.termType !== "NamedNode") {
-              logger.warn("non-IRI quad graph: ", quad.graph.value);
-              continue;
-            }
-
+          for await (const quad of parseNQuadsStream(
+            (await this.httpClient.get(this.dataFileUrl)).pipe(
+              zlib.createGunzip()
+            )
+          )) {
             let payLevelDomainName: string;
             if (
               batch !== null &&

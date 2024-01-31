@@ -16,7 +16,7 @@ describe("SchemaDotOrgDataSet", () => {
     expect(administrativeAreaClassSubset.className).toBe("AdministrativeArea");
   });
 
-  it("gets the class-specific subsets", async () => {
+  it("gets class-specific subset metadata", async () => {
     expect(classSubsets).toHaveLength(48);
     for (const classSubset of classSubsets) {
       expect(classSubset.className).not.toBe("");
@@ -27,7 +27,7 @@ describe("SchemaDotOrgDataSet", () => {
     }
   });
 
-  it("parses the table row for a class-specific subset", () => {
+  it("parses the metadata for a single class-specific subset", () => {
     expect(administrativeAreaClassSubset.className).toStrictEqual(
       "AdministrativeArea"
     );
@@ -41,6 +41,17 @@ describe("SchemaDotOrgDataSet", () => {
       381624
     );
     expect(administrativeAreaClassSubset.numberOfFiles).toStrictEqual(1);
+  });
+
+  it("gets the class-specific subset dataset", async () => {
+    if (process.env.CI) {
+      return;
+    }
+
+    for await (const _quad of administrativeAreaClassSubset.dataset()) {
+      return;
+    }
+    fail();
   });
 
   it("gets PLD stats", async () => {
