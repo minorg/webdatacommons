@@ -24,8 +24,23 @@ describe("SchemaDotOrgDataSet", () => {
       expect(classSubset.generalStats.quads).toBeGreaterThan(0);
       expect(classSubset.generalStats.urls).toBeGreaterThan(0);
       expect(classSubset.relatedClasses).not.toHaveLength(0);
-      expect(classSubset.size).not.toBe("");
     }
+  });
+
+  it("parses the table row for a class-specific subset", () => {
+    expect(administrativeAreaClassSubset.className).toStrictEqual(
+      "AdministrativeArea"
+    );
+    expect(administrativeAreaClassSubset.generalStats.hosts).toStrictEqual(
+      2695
+    );
+    expect(administrativeAreaClassSubset.generalStats.quads).toStrictEqual(
+      77960962
+    );
+    expect(administrativeAreaClassSubset.generalStats.urls).toStrictEqual(
+      381624
+    );
+    expect(administrativeAreaClassSubset.numberOfFiles).toStrictEqual(1);
   });
 
   it("gets PLD stats", async () => {

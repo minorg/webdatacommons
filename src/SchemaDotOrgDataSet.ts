@@ -131,6 +131,13 @@ class SchemaDotOrgDataSet {
         );
 
         const sizeCell = tableCells[2];
+        const sizeCellTextParts = sizeCell.text.split(" ");
+        const numberOfFiles = parseInt(
+          sizeCellTextParts[sizeCellTextParts.length - 1].substring(
+            1,
+            sizeCellTextParts[sizeCellTextParts.length - 1].length - 1
+          )
+        );
 
         const downloadHrefs = tableCells[3]
           .getElementsByTagName("a")
@@ -153,12 +160,12 @@ class SchemaDotOrgDataSet {
           },
           httpClient: this.httpClient,
           lookupFileUrl,
+          numberOfFiles,
           parent: this,
           pldStatsFileUrl,
           relatedClasses,
           sampleDataFileUrl: downloadHrefs[1],
           showProgress: this.showProgress,
-          size: sizeCell.text,
         });
       });
   }
@@ -185,12 +192,12 @@ namespace SchemaDotOrgDataSet {
     readonly generalStats: SchemaDotOrgDataSet.ClassSubset.GeneralStats;
     private readonly httpClient: HttpClient;
     private readonly lookupFileUrl: string;
+    readonly numberOfFiles: number;
     readonly parent: SchemaDotOrgDataSet;
     private readonly pldStatsFileUrl: string;
     readonly relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
     private readonly sampleDataFileUrl: string;
     private readonly showProgress: boolean;
-    readonly size: string;
 
     constructor({
       cache,
@@ -199,12 +206,12 @@ namespace SchemaDotOrgDataSet {
       generalStats,
       httpClient,
       lookupFileUrl,
+      numberOfFiles,
       parent,
       pldStatsFileUrl,
       relatedClasses,
       sampleDataFileUrl,
       showProgress,
-      size,
     }: {
       cache: ImmutableCache;
       className: string;
@@ -216,12 +223,12 @@ namespace SchemaDotOrgDataSet {
       };
       httpClient: HttpClient;
       lookupFileUrl: string;
+      numberOfFiles: number;
       parent: SchemaDotOrgDataSet;
       pldStatsFileUrl: string;
       relatedClasses: readonly SchemaDotOrgDataSet.ClassSubset.RelatedClass[];
       sampleDataFileUrl: string;
       showProgress: boolean;
-      size: string;
     }) {
       this.cache = cache;
       this.className = className;
@@ -229,12 +236,12 @@ namespace SchemaDotOrgDataSet {
       this.generalStats = generalStats;
       this.httpClient = httpClient;
       this.lookupFileUrl = lookupFileUrl;
+      this.numberOfFiles = numberOfFiles;
       this.parent = parent;
       this.pldStatsFileUrl = pldStatsFileUrl;
       this.relatedClasses = relatedClasses;
       this.sampleDataFileUrl = sampleDataFileUrl;
       this.showProgress = showProgress;
-      this.size = size;
     }
 
     private async lookupCsvString(): Promise<string> {
