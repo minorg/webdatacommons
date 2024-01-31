@@ -7,13 +7,13 @@ import {
 } from "node-html-parser";
 import {Memoize} from "typescript-memoize";
 import HttpClient from "./HttpClient.js";
-import {StreamParser, Store, Quad, Parser, Writer} from "n3";
+import {Store, Quad, Parser, Writer} from "n3";
 import Papa from "papaparse";
 import {DatasetCore, NamedNode} from "@rdfjs/types";
 import {invariant} from "ts-invariant";
 import zlib from "node:zlib";
 import streamToBuffer from "./streamToBuffer.js";
-import {Readable, Stream} from "node:stream";
+import {Readable} from "node:stream";
 import cliProgress from "cli-progress";
 import logger from "./logger.js";
 import ImmutableCache from "./ImmutableCache.js";
@@ -287,17 +287,6 @@ namespace SchemaDotOrgDataSet {
       }
     }
 
-    private async pldDataFileNames(): Promise<Record<string, string>> {
-      return Papa.parse(await this.lookupCsvString(), {
-        header: true,
-      }).data.reduce((map: Record<string, string>, row: any) => {
-        if (row["pld"].length > 0) {
-          map[row["pld"]] = row["file_lookup"];
-        }
-        return map;
-      }, {});
-    }
-
     @Memoize()
     async payLevelDomainSubsets(): Promise<
       readonly SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset[]
@@ -319,12 +308,27 @@ namespace SchemaDotOrgDataSet {
           return {};
       }
 
-      const pldDataFileNames = await this.pldDataFileNames();
+      const pldDataFileNames = Papa.parse(await this.lookupCsvString(), {
+        header: true,
+      }).data.reduce((map: Record<string, string>, row: any) => {
+        if (row["pld"].length > 0) {
+          map[row["pld"]] = row["file_lookup"];
+        }
+        return map;
+      }, {});
+
       return (
-        Papa.parse(await this.pldStatsCsvString(), {
-          delimiter: "\t",
-          header: true,
-        }).data as any[]
+        Papa.parse(
+          (
+            await streamToBuffer(
+              await this.httpClient.get(this.pldStatsFileUrl)
+            )
+          ).toString("utf8"),
+          {
+            delimiter: "\t",
+            header: true,
+          }
+        ).data as any[]
       ).reduce(
         (
           map: Record<
@@ -363,16 +367,6 @@ namespace SchemaDotOrgDataSet {
       );
     }
 
-    private async pldStatsCsvString(): Promise<string> {
-      return (
-        await streamToBuffer(await this.httpClient.get(this.pldStatsFileUrl))
-      ).toString("utf8");
-    }
-
-    private async sampleNquadsStream(): Promise<Stream> {
-      return await this.httpClient.get(this.sampleDataFileUrl);
-    }
-
     @Memoize()
     async samplePages(): Promise<
       readonly SchemaDotOrgDataSet.ClassSubset.PageSubset[]
@@ -384,40 +378,26 @@ namespace SchemaDotOrgDataSet {
     async samplePagesByIri(): Promise<
       Record<string, SchemaDotOrgDataSet.ClassSubset.PageSubset>
     > {
-      const quadStream = (await this.sampleNquadsStream()).pipe(
-        new StreamParser({format: "N-Quads"})
-      );
-      return new Promise((resolve, reject) => {
-        const result: Record<
-          string,
-          SchemaDotOrgDataSet.ClassSubset.PageSubset
-        > = {};
-        quadStream.on("data", (quad) => {
-          const pageIri = quad.graph;
-          if (pageIri.termType !== "NamedNode") {
-            return;
-          }
-          let page = result[pageIri.value];
-          if (!page) {
-            page = result[pageIri.value] =
-              new SchemaDotOrgDataSet.ClassSubset.PageSubset({
-                dataset: new Store(),
-                pageIri,
-              });
-          }
-          (page.dataset as Store).addQuad(quad);
-        });
-        quadStream.on("error", (error) => {
-          logger.error("error parsing %s: %s", this.sampleDataFileUrl, error);
-        });
-        quadStream.on("end", (error: any) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve(result);
-          }
-        });
-      });
+      const result: Record<string, SchemaDotOrgDataSet.ClassSubset.PageSubset> =
+        {};
+      for await (const quad of parseNQuadsStream(
+        await this.httpClient.get(this.sampleDataFileUrl)
+      )) {
+        const pageIri = quad.graph;
+        if (pageIri.termType !== "NamedNode") {
+          continue;
+        }
+        let page = result[pageIri.value];
+        if (!page) {
+          page = result[pageIri.value] =
+            new SchemaDotOrgDataSet.ClassSubset.PageSubset({
+              dataset: new Store(),
+              pageIri,
+            });
+        }
+        (page.dataset as Store).addQuad(quad);
+      }
+      return result;
     }
   }
 
