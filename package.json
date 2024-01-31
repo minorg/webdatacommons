@@ -26,8 +26,7 @@
     "pino": "^8.17.2",
     "split2": "^4.2.0",
     "ts-invariant": "^0.10.3",
-    "typescript-memoize": "^1.1.1",
-    "v8-profiler-next": "^1.10.0"
+    "typescript-memoize": "^1.1.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.11",
@@ -64,5 +63,5 @@
   },
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "3.0.0"
+  "version": "3.0.1"
 }
