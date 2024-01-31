@@ -299,6 +299,13 @@ namespace SchemaDotOrgDataSet {
     }
 
     @Memoize()
+    async payLevelDomainSubsets(): Promise<
+      readonly SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset[]
+    > {
+      return Object.values(await this.payLevelDomainSubsetsByDomain());
+    }
+
+    @Memoize()
     async payLevelDomainSubsetsByDomain(): Promise<
       Record<string, SchemaDotOrgDataSet.ClassSubset.PayLevelDomainSubset>
     > {

@@ -54,6 +54,17 @@ describe("SchemaDotOrgDataSet", () => {
     fail();
   });
 
+  it("gets PLD subsets", async () => {
+    const pldSubsets =
+      await administrativeAreaClassSubset.payLevelDomainSubsets();
+    expect(pldSubsets.length).toBeGreaterThan(0);
+
+    const pldSubset = (
+      await administrativeAreaClassSubset.payLevelDomainSubsetsByDomain()
+    )["balsamohomes.com"];
+    expect(pldSubset).not.toBeUndefined();
+  });
+
   it("gets PLD stats", async () => {
     const pldSubsets = Object.values(
       await administrativeAreaClassSubset.payLevelDomainSubsetsByDomain()
