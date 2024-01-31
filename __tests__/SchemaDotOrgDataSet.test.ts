@@ -129,6 +129,10 @@ describe("SchemaDotOrgDataSet", () => {
   );
 
   it("gets sample pages", async () => {
+    expect(
+      (await administrativeAreaClassSubset.samplePages()).length
+    ).toBeGreaterThan(0);
+
     const samplePagesByIri =
       await administrativeAreaClassSubset.samplePagesByIri();
     expect(Object.keys(samplePagesByIri)).toHaveLength(1);

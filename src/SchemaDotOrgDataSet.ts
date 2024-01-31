@@ -374,6 +374,13 @@ namespace SchemaDotOrgDataSet {
     }
 
     @Memoize()
+    async samplePages(): Promise<
+      readonly SchemaDotOrgDataSet.ClassSubset.PageSubset[]
+    > {
+      return Object.values(await this.samplePagesByIri());
+    }
+
+    @Memoize()
     async samplePagesByIri(): Promise<
       Record<string, SchemaDotOrgDataSet.ClassSubset.PageSubset>
     > {
